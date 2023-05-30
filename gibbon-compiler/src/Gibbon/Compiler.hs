@@ -712,7 +712,7 @@ pass config who fn x = do
   x' <- if dbgLvl >= passChatterLvl
         then lift $ evaluate $ force x
         else return x
-  lift$ dbgPrint passChatterLvl $ " [compiler] Running pass, " ++who
+  lift $ dbgPrint passChatterLvl $ " [compiler] Running pass, " ++ who
 
   let (y,cnt') = runPassM config cnt (fn x')
   put cs{cnt=cnt'}
@@ -720,9 +720,17 @@ pass config who fn x = do
         then lift $ evaluate $ force y
         else return y
   if dbgLvl >= passChatterLvl+1
-     then lift$ dbgPrintLn (passChatterLvl+1) $ "Pass output:\n"++sepline++"\n"++ (pprender y')
-     -- TODO: Switch to a node-count for size output (add to GenericOps):
-     else lift$ dbgPrintLn passChatterLvl $ "   => "++ show (length (sdoc y')) ++ " characters output."
+    then lift $ dbgPrintLn (passChatterLvl+1) $ mconcat 
+      [ "Pass output:", "\n"
+      , sepline, "\n"
+      , pprender y'
+      ]
+    -- TODO: Switch to a node-count for size output (add to GenericOps):
+    else lift $ dbgPrintLn passChatterLvl $ mconcat
+      ["   => "
+      , show $ length $ sdoc y'
+      , " characters output."
+      ]
   return y'
 
 

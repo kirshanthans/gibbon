@@ -27,6 +27,7 @@ import           System.IO
 import           Gibbon.L0.Syntax as L0
 import           Gibbon.Common
 import           Gibbon.DynFlags
+import qualified Data.Bifunctor
 
 --------------------------------------------------------------------------------
 
@@ -64,19 +65,19 @@ parseFile cfg path = do
     parseFile' cfg pstate0_ref [] path
 
 
-data ParseState = ParseState
-    { imported :: M.Map (String, FilePath) Prog0 }
+newtype ParseState = ParseState { imported :: M.Map (String, FilePath) Prog0 }
 
 emptyParseState :: ParseState
 emptyParseState = ParseState M.empty
 
 parseMode :: ParseMode
-parseMode = defaultParseMode { extensions = [ EnableExtension ScopedTypeVariables
-                                            , EnableExtension CPP
-                                            , EnableExtension TypeApplications
-                                            ]
-                                            ++ (extensions defaultParseMode)
-                             }
+parseMode = defaultParseMode
+  { extensions =
+    [ EnableExtension ScopedTypeVariables
+    , EnableExtension CPP
+    , EnableExtension TypeApplications
+    ] ++ extensions defaultParseMode
+  }
 
 parseFile' :: Config -> IORef ParseState -> [String] -> FilePath -> IO (PassM Prog0)
 parseFile' cfg pstate_ref import_route path = do
@@ -113,7 +114,6 @@ typecheckWithGhc cfg path = do
         err <- hGetContents herr
         putStrLn out
         putStrLn err
-      pure ()
     ExitFailure _ -> do
       err <- hGetContents herr
       error err
@@ -169,8 +169,8 @@ desugarModule cfg pstate_ref import_route dir (Module _ head_mb _pragmas imports
   let prog = do
         toplevels <- catMaybes <$> mapM (collectTopLevel type_syns funtys) decls
         let (defs,_vars,funs,inlines,main) = foldr classify init_acc toplevels
-            funs' = foldr (\v acc -> M.update (\fn@(FunDef{funMeta}) -> Just (fn { funMeta = funMeta { funInline = Inline }})) v acc) funs inlines
-        imported_progs' <- mapM id imported_progs
+            funs' = foldr (M.update (\fn@(FunDef{funMeta}) -> Just (fn { funMeta = funMeta { funInline = Inline }}))) funs inlines
+        imported_progs' <- sequence imported_progs
         let (defs0,funs0) =
               foldr
                 (\Prog{ddefs,fundefs} (defs1,funs1) ->
@@ -190,7 +190,7 @@ desugarModule cfg pstate_ref import_route dir (Module _ head_mb _pragmas imports
                          conflicts2 = foldr
                                         (\f acc ->
                                              if (fundefs M.! f) /= (funs1 M.! f)
-                                             then dbgTraceIt (sdoc ((fundefs M.! f), (funs1 M.! f))) (f : acc)
+                                             then dbgTraceIt (sdoc (fundefs M.! f, funs1 M.! f)) (f : acc)
                                              else acc)
                                         []
                                         em2
@@ -234,9 +234,9 @@ processImport cfg pstate_ref import_route dir decl@ImportDecl{..}
     | otherwise = do
     when (mod_name `elem` import_route) $
       error $ "Circular dependency detected. Import path: "++ show (mod_name : import_route)
-    when (importQualified) $ error $ "Qualified imports not supported yet. Offending import: " ++  prettyPrint decl
-    when (isJust importAs) $ error $ "Module aliases not supported yet. Offending import: " ++  prettyPrint decl
-    when (isJust importSpecs) $ error $ "Selective imports not supported yet. Offending import: " ++  prettyPrint decl
+    when importQualified $ error $ "Qualified imports not supported yet. Offending import: " ++ prettyPrint decl
+    when (isJust importAs) $ error $ "Module aliases not supported yet. Offending import: " ++ prettyPrint decl
+    when (isJust importSpecs) $ error $ "Selective imports not supported yet. Offending import: " ++ prettyPrint decl
     (ParseState imported) <- readIORef pstate_ref
     mod_fp <- if mod_name `elem` stdlibModules
                 then stdlibImportPath mod_name
@@ -309,8 +309,12 @@ moduleNameToSlashes (ModuleName _ s) = dots_to_slashes s
 
 
 builtinTys :: S.Set Var
-builtinTys = S.fromList $
-    [ "Int", "Float", "Bool", "Sym", "SymHash", "IntHash", "SymSet", "SymDict", "Arena", "Vector" ]
+builtinTys = S.fromList
+    [ "Int", "Float", "Bool"
+    , "Sym", "SymHash", "IntHash"
+    , "SymSet", "SymDict"
+    , "Arena", "Vector"
+    ]
 
 keywords :: S.Set Var
 keywords = S.fromList $ map toVar $
@@ -422,7 +426,7 @@ unCurryTy ty1 =
     go :: [Ty0] -> Ty0 -> ([Ty0], Ty0)
     go acc ty =
       case ty of
-        ArrowTy as b -> (go (acc++as) b)
+        ArrowTy as b -> go (acc++as) b
         _ -> (acc,ty)
 
 -- ^ A map between SExp-frontend prefix function names, and Gibbon
@@ -488,13 +492,13 @@ desugarExp :: (Show a, Pretty a) => TypeSynEnv -> TopTyEnv -> Exp a -> PassM Exp
 desugarExp type_syns toplevel e =
   case e of
     Paren _ (ExpTypeSig _ (App _ (H.Var _ f) (Lit _ lit)) tyc)
-        | (qnameToStr f) == "error" -> pure $ PrimAppE (ErrorP (litToString lit) (desugarType type_syns tyc)) []
+        | qnameToStr f == "error" -> pure $ PrimAppE (ErrorP (litToString lit) (desugarType type_syns tyc)) []
     -- Paren _ (App _ (H.Var _ f) (Lit _ lit))
     --     | (qnameToStr f) == "error" -> pure $ PrimAppE (ErrorP (litToString lit
     Paren _ e2 -> desugarExp type_syns toplevel e2
     H.Var _ qv -> do
       let str = qnameToStr qv
-          v = (toVar str)
+          v = toVar str
       if str == "alloc_pdict"
       then do
         kty  <- newMetaTy
@@ -504,23 +508,20 @@ desugarExp type_syns toplevel e =
       then do
         ty  <- newMetaTy
         pure $ PrimAppE (LLAllocP ty) []
-      else if v == "sync"
-      then pure SyncE
-      else if v == "lsync"
-      then pure SyncE
+      else if (v == "sync") || (v == "lsync") then pure SyncE
       else if M.member str primMap
-      then pure $ PrimAppE (primMap M.! str) []
-      else case M.lookup v toplevel of
-             Just sigma ->
-               case tyFromScheme sigma of
-                 ArrowTy{} ->
-                   -- Functions with >0 args must be VarE's here -- the 'App _ e1 e2'
-                   -- case below depends on it.
-                   pure $ VarE v
-                 -- Otherwise, 'v' is a top-level value binding, which we
-                 -- encode as a function which takes no arguments.
-                 _ -> pure $ AppE v [] []
-             Nothing -> pure $ VarE v
+        then pure $ PrimAppE (primMap M.! str) []
+        else case M.lookup v toplevel of
+          Just sigma ->
+            case tyFromScheme sigma of
+              ArrowTy{} ->
+                -- Functions with >0 args must be VarE's here -- the 'App _ e1 e2'
+                -- case below depends on it.
+                pure $ VarE v
+              -- Otherwise, 'v' is a top-level value binding, which we
+              -- encode as a function which takes no arguments.
+              _ -> pure $ AppE v [] []
+          Nothing -> pure $ VarE v
     Lit _ lit  -> desugarLiteral lit
 
     Lambda _ pats bod -> do
@@ -542,7 +543,7 @@ desugarExp type_syns toplevel e =
                          _ -> error "desugarExp: quote only accepts string literals. E.g quote \"hello\""
                   else if f == "eqBenchProg"
                   then case e2 of
-                         Lit _ lit -> pure $ (PrimAppE (EqBenchProgP (litToString lit)) [])
+                         Lit _ lit -> pure $ PrimAppE (EqBenchProgP (litToString lit)) []
                          _ -> error "desugarExp: eqBenchProg only accepts string literals."
                   else if f == "readArrayFile"
                   then let go e0 = case e0 of
@@ -754,7 +755,7 @@ desugarExp type_syns toplevel e =
                     pure $ Ext (LinearExt (LseqE e2' undefined))
                   else if S.member f keywords
                   then error $ "desugarExp: Keyword not handled: " ++ sdoc f
-                  else AppE f [] <$> (: []) <$> desugarExp type_syns toplevel e2
+                  else AppE f [] . (: []) <$> desugarExp type_syns toplevel e2
           (DataConE tyapp c as) -> (\e2' -> DataConE tyapp c (as ++ [e2'])) <$> desugarExp type_syns toplevel e2
           (Ext (ParE0 ls)) -> do
             e2' <- desugarExp type_syns toplevel e2
@@ -877,7 +878,7 @@ desugarFun type_syns toplevel env decl =
   case decl of
     FunBind _ [Match _ fname pats (UnGuardedRhs _ bod) _where] -> do
       let fname_str = nameToStr fname
-          fname_var = toVar (fname_str)
+          fname_var = toVar fname_str
       (vars, arg_tys,bindss) <- unzip3 <$> mapM (desugarPatWithTy type_syns) pats
       let binds = concat bindss
           args = vars
@@ -885,10 +886,10 @@ desugarFun type_syns toplevel env decl =
                   Nothing -> do
                      ret_ty  <- newMetaTy
                      let funty = ArrowTy arg_tys ret_ty
-                     pure $ (ForAll [] funty)
+                     pure $ ForAll [] funty
                   Just ty -> pure ty
       bod' <- desugarExp type_syns toplevel bod
-      pure $ (fname_var, args, unCurryTopTy fun_ty, (mkLets binds bod'))
+      pure (fname_var, args, unCurryTopTy fun_ty, mkLets binds bod')
     _ -> error $ "desugarFun: Found a function with multiple RHS, " ++ prettyPrint decl
 
 multiArgsToOne :: [Var] -> [Ty0] -> Exp0 -> (Var, Exp0)
@@ -942,7 +943,7 @@ collectTopLevel type_syns env decl =
       pure Nothing
 
     PatBind _ (PVar _ (Ident _ "gibbon_main")) (UnGuardedRhs _ rhs) _binds -> do
-      rhs' <- fixupSpawn <$> verifyBenchEAssumptions True <$> desugarExp type_syns toplevel rhs
+      rhs' <- fixupSpawn . verifyBenchEAssumptions True <$> desugarExp type_syns toplevel rhs
       ty <- newMetaTy
       pure $ Just $ HMain $ Just (rhs', ty)
 
@@ -1014,9 +1015,10 @@ desugarLiteral lit =
       vec <- gensym (toVar "vec")
       let n = length str
           init_vec = LetE (vec,[],VectorTy CharTy, PrimAppE (VAllocP CharTy) [LitE n])
-          fn i c b = LetE ("_",[],VectorTy CharTy,
-                           PrimAppE (InplaceVUpdateP CharTy) [VarE vec, LitE i, CharE c])
-                     b
+          fn i c = LetE
+            ( "_", [], VectorTy CharTy
+            , PrimAppE (InplaceVUpdateP CharTy) [VarE vec, LitE i, CharE c]
+            )
           add_chars = foldr (\(i,chr) acc -> fn i chr acc) (VarE vec)
                         (reverse $ zip [0..n-1] str)
       pure $ init_vec add_chars
@@ -1025,7 +1027,7 @@ desugarLiteral lit =
 
 
 litToInt :: Literal a -> Int
-litToInt (Int _ i _) = (fromIntegral i)
+litToInt (Int _ i _) = fromIntegral i
 litToInt lit         = error ("litToInt: Not an integer: " ++ prettyPrint lit)
 
 litToString :: Literal a -> String
@@ -1035,14 +1037,14 @@ litToString lit            = error ("litToString: Expected a String, got: " ++ p
 qnameToStr :: H.QName a -> String
 qnameToStr qname =
   case qname of
-    Qual _ mname n -> (mnameToStr mname ++ "." ++ nameToStr n)
-    UnQual _ n     -> (nameToStr n)
+    Qual _ mname n -> mnameToStr mname ++ "." ++ nameToStr n
+    UnQual _ n     -> nameToStr n
     Special{}      -> error $ "qnameToStr: Special identifiers not supported: " ++ prettyPrint qname
 
 mnameToStr :: ModuleName a -> String
 mnameToStr (ModuleName _ s) = s
 
-desugarOp :: QOp a -> (Prim Ty0)
+desugarOp :: QOp a -> Prim Ty0
 desugarOp qop =
   case qop of
     QVarOp _ (UnQual _ (Symbol _ op)) ->
@@ -1073,7 +1075,7 @@ desugarAlt type_syns toplevel alt =
       ps'' <- mapM (\v -> (v,) <$> newMetaTy) ps'
       pure (conName, ps'', rhs')
 
-generateBind :: (Show a,  Pretty a) => TypeSynEnv -> TopTyEnv -> TopTyEnv -> Decl a -> Exp0 -> PassM (Exp0)
+generateBind :: (Show a,  Pretty a) => TypeSynEnv -> TopTyEnv -> TopTyEnv -> Decl a -> Exp0 -> PassM Exp0
 generateBind type_syns toplevel env decl exp2 =
   case decl of
     -- 'collectTopTy' takes care of this.
@@ -1086,7 +1088,7 @@ generateBind type_syns toplevel env decl exp2 =
       rhs' <- desugarExp type_syns toplevel rhs
       w <- gensym "tup"
       ty' <- newMetaTy
-      let tupexp e = LetE (w,[],ty',rhs') e
+      let tupexp = LetE (w,[],ty',rhs')
           binds = reverse $ zip pats [0..]
       prjexp <- generateTupleProjs toplevel env binds (VarE w) exp2
       pure $ tupexp prjexp
@@ -1104,7 +1106,7 @@ generateBind type_syns toplevel env decl exp2 =
                     pure $ LetE (name,[], tyFromScheme ty, Ext $ LambdaE (zip args (inTys ty)) bod) exp2
     oth -> error ("generateBind: Unsupported pattern: " ++ prettyPrint oth)
 
-generateTupleProjs :: (Show a, Pretty a) => TopTyEnv -> TopTyEnv -> [(Pat a,Int)] -> Exp0 -> Exp0 -> PassM (Exp0)
+generateTupleProjs :: (Show a, Pretty a) => TopTyEnv -> TopTyEnv -> [(Pat a,Int)] -> Exp0 -> Exp0 -> PassM Exp0
 generateTupleProjs _toplevel _env [] _tup exp2 = pure exp2
 generateTupleProjs toplevel env ((p,n):pats) tup exp2 =
     case p of
@@ -1220,11 +1222,11 @@ fixupSpawn ex =
     WithArenaE v e -> WithArenaE v (go e)
     SpawnE _ _ args ->
       case args of
-          [(AppE fn tyapps ls)] -> SpawnE fn tyapps ls
+          [AppE fn tyapps ls] -> SpawnE fn tyapps ls
           _ -> error $ "fixupSpawn: incorrect use of spawn: " ++ sdoc ex
     SyncE   -> SyncE
-    MapE{}  -> error $ "fixupSpawn: TODO MapE"
-    FoldE{} -> error $ "fixupSpawn: TODO FoldE"
+    MapE{}  -> error "fixupSpawn: TODO MapE"
+    FoldE{} -> error "fixupSpawn: TODO FoldE"
   where go = fixupSpawn
 
 -- | Verify some assumptions about BenchE.
@@ -1264,8 +1266,8 @@ verifyBenchEAssumptions bench_allowed ex =
     WithArenaE v e -> WithArenaE v (go e)
     SpawnE fn tyapps args -> SpawnE fn tyapps (map not_allowed args)
     SyncE    -> SyncE
-    MapE{}  -> error $ "verifyBenchEAssumptions: TODO MapE"
-    FoldE{} -> error $ "verifyBenchEAssumptions: TODO FoldE"
+    MapE{}  -> error "verifyBenchEAssumptions: TODO MapE"
+    FoldE{} -> error "verifyBenchEAssumptions: TODO FoldE"
   where go = verifyBenchEAssumptions bench_allowed
         not_allowed = verifyBenchEAssumptions False
 
@@ -1281,10 +1283,10 @@ desugarLinearExts (Prog ddefs fundefs main) = do
                  pure $ Just (e', ty')
     fundefs' <- mapM (\fn -> do
                            bod <- go (funBody fn)
-                           let (ForAll tyvars ty) = (funTy fn)
+                           let (ForAll tyvars ty) = funTy fn
                                ty' = goty ty
                            pure $ fn { funBody = bod
-                                     , funTy = (ForAll tyvars ty')
+                                     , funTy = ForAll tyvars ty'
                                      })
                      fundefs
     pure (Prog ddefs fundefs' main')
@@ -1332,8 +1334,7 @@ desugarLinearExts (Prog ddefs fundefs main) = do
                                                             pure (a,b,c'))
                                             alts
                               pure (CaseE scrt' alts')
-        DataConE _ "Ur" [arg]   -> do arg' <- go arg
-                                      pure arg'
+        DataConE _ "Ur" [arg]   -> do go arg
         DataConE locs dcon args -> do args' <- mapM go args
                                       pure (DataConE locs dcon args')
         TimeIt e ty b -> do e' <- go e
@@ -1349,7 +1350,7 @@ desugarLinearExts (Prog ddefs fundefs main) = do
         Ext ext ->
           case ext of
             LambdaE args bod -> do bod' <- go bod
-                                   let args' = map (\(v,ty) -> (v,goty ty)) args
+                                   let args' = map (Data.Bifunctor.second goty) args
                                    pure (Ext (LambdaE args' bod'))
             PolyAppE fn arg  -> do fn' <- go fn
                                    arg' <- go arg
@@ -1384,10 +1385,8 @@ desugarLinearExts (Prog ddefs fundefs main) = do
                     Ext (LambdaE [(v,ty)] bod) -> do
                       pure (LetE (v,[],ty,arg') bod)
                     _ -> error $ "desugarLinearExts: couldn't desugar " ++ sdoc ex
-                LseqE _ b   -> do b' <- go b
-                                  pure b'
+                LseqE _ b   -> do go b
                 AliasE a    -> do v <- gensym "aliased"
                                   ty <- newMetaTy
                                   pure (LetE (v,[],ty,MkProdE [a,a]) (VarE v))
-                ToLinearE a -> do a' <- go a
-                                  pure a'
+                ToLinearE a -> do go a
