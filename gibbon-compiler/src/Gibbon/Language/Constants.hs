@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use infix" #-}
 module Gibbon.Language.Constants where
 
 import qualified Data.List as L
@@ -60,25 +62,25 @@ isPrinterName :: Var -> Bool
 isPrinterName v = L.isPrefixOf "_print_" (fromVar v)
 
 mkCopyFunName :: TyCon -> Var
-mkCopyFunName dcon = "_copy_" `varAppend` (toVar dcon)
+mkCopyFunName dcon = "_copy_" `varAppend` toVar dcon
 
 isCopyFunName :: Var -> Bool
 isCopyFunName = L.isPrefixOf "_copy_" . fromVar
 
 mkCopySansPtrsFunName :: TyCon -> Var
-mkCopySansPtrsFunName dcon = "_copy_without_ptrs_" `varAppend` (toVar dcon)
+mkCopySansPtrsFunName dcon = "_copy_without_ptrs_" `varAppend` toVar dcon
 
 isCopySansPtrsFunName :: Var -> Bool
 isCopySansPtrsFunName = L.isPrefixOf "_copy_without_ptrs_" . fromVar
 
 mkTravFunName :: TyCon -> Var
-mkTravFunName dcon = "_traverse_" `varAppend` (toVar dcon)
+mkTravFunName dcon = "_traverse_" `varAppend` toVar dcon
 
 isTravFunName :: Var -> Bool
 isTravFunName = L.isPrefixOf "_traverse_" . fromVar
 
 mkRelOffsetsFunName :: DataCon -> Var
-mkRelOffsetsFunName dcon = "_add_size_and_rel_offsets_" `varAppend` (toVar dcon)
+mkRelOffsetsFunName dcon = "_add_size_and_rel_offsets_" `varAppend` toVar dcon
 
 isRelOffsetsFunName :: Var -> Bool
 isRelOffsetsFunName = L.isPrefixOf "_add_size_and_rel_offsets_" . fromVar

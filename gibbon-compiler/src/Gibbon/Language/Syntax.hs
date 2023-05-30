@@ -53,10 +53,10 @@ module Gibbon.Language.Syntax
 import           Control.DeepSeq
 import           Control.Monad.State
 import           Control.Monad.Writer
-#if !MIN_VERSION_base(4,13,0)
--- https://downloads.haskell.org/ghc/8.8.1/docs/html/users_guide/8.8.1-notes.html
-import           Control.Monad.Fail(MonadFail(..))
-#endif
+
+
+
+
 import qualified Data.Map as M
 import qualified Data.List as L
 import qualified Data.Set as S
@@ -118,7 +118,7 @@ getConOrdering dd tycon = L.map fst dataCons
 -- | Lookup the name of the TyCon that goes with a given DataCon.
 --   Must be unique!
 getTyOfDataCon :: Out a => DDefs a -> DataCon -> TyCon
-getTyOfDataCon dds con = (fromVar . fst) $ lkp dds con
+getTyOfDataCon dds con = fromVar . fst $ lkp dds con
 
 -- | Lookup the arguments to a data contstructor.
 lookupDataCon :: Out a => DDefs a -> DataCon -> [a]
@@ -224,7 +224,7 @@ fromListFD = L.foldr insertFD M.empty
 
 -- |
 initFunEnv :: FunDefs a -> TyEnv (ArrowTy (TyOf a))
-initFunEnv fds = M.map funTy fds
+initFunEnv = M.map funTy
 
 --------------------------------------------------------------------------------
 -- Programs
@@ -238,7 +238,7 @@ initFunEnv fds = M.map funTy fds
 -- appropriate packed AST datatype.
 data Prog ex = Prog { ddefs   :: DDefs (TyOf ex)
                     , fundefs :: FunDefs ex
-                    , mainExp :: Maybe (ex, (TyOf ex))
+                    , mainExp :: Maybe (ex, TyOf ex)
                     }
 
 -- Since 'FunDef' is defined using a type family, we cannot use the deriving clause.
@@ -304,14 +304,14 @@ extendsVEnv :: M.Map Var a -> Env2 a -> Env2 a
 extendsVEnv mp (Env2 ve fe) = Env2 (M.union mp ve) fe
 
 lookupVEnv :: Out a => Var -> Env2 a -> a
-lookupVEnv v env2 = (vEnv env2) # v
+lookupVEnv v env2 = vEnv env2 # v
 
 -- | Extend function type environment.
 extendFEnv :: Var -> ArrowTy a -> Env2 a -> Env2 a
 extendFEnv v t (Env2 ve fe) = Env2 ve (M.insert v t fe)
 
 lookupFEnv :: Out (ArrowTy a) => Var -> Env2 a -> ArrowTy a
-lookupFEnv v env2 = (fEnv env2) # v
+lookupFEnv v env2 = fEnv env2 # v
 
 
 --------------------------------------------------------------------------------
@@ -320,7 +320,7 @@ lookupFEnv v env2 = (fEnv env2) # v
 
 -- Shorthand to make the below definition more readable.
 -- I.e., this covers all the verbose recursive fields.
-#define EXP (PreExp ext loc dec)
+
 
 -- | The source language.  It has pointer-based sums and products, as
 -- well as packed algebraic datatypes.
@@ -337,49 +337,49 @@ data PreExp (ext :: Type -> Type -> Type) loc dec =
    | CharE Char            -- ^ A character literal
    | FloatE Double         -- ^ Floating point literal
    | LitSymE Var           -- ^ A quoted symbol literal
-   | AppE Var [loc] [EXP]
+   | AppE Var [loc] [PreExp ext loc dec]
      -- ^ Apply a top-level / first-order function.  Instantiate
      -- its type schema by providing location-variable arguments,
      -- if applicable.
-   | PrimAppE (Prim dec) [EXP]
+   | PrimAppE (Prim dec) [PreExp ext loc dec]
      -- ^ Primitive applications don't manipulate locations.
-   | LetE (Var,[loc],dec, EXP) -- binding
-          EXP                  -- body
+   | LetE (Var,[loc],dec, PreExp ext loc dec) -- binding
+          (PreExp ext loc dec)                  -- body
     -- ^ One binding at a time.  Allows binding a list of
     -- implicit *location* return vales from the RHS, plus a single "real" value.
     -- This list of implicit returnsb
 
-   | IfE EXP EXP EXP
+   | IfE (PreExp ext loc dec) (PreExp ext loc dec) (PreExp ext loc dec)
 
    -- TODO: eventually tuples will just be a wired-in datatype.
-   | MkProdE   [EXP] -- ^ Tuple construction
-   | ProjE Int EXP   -- ^ Tuple projection.
+   | MkProdE   [PreExp ext loc dec] -- ^ Tuple construction
+   | ProjE Int (PreExp ext loc dec)   -- ^ Tuple projection.
 
-   | CaseE EXP [(DataCon, [(Var,loc)], EXP)]
+   | CaseE (PreExp ext loc dec) [(DataCon, [(Var,loc)], PreExp ext loc dec)]
      -- ^ Case on a datatype.  Each bound, unpacked variable lives at
      -- a fixed, read-only location.
 
-   | DataConE loc DataCon [EXP]
+   | DataConE loc DataCon [PreExp ext loc dec]
      -- ^ Construct data that may unpack some fields.  The location
      -- argument, if applicable, is the byte location at which to
      -- write the tag for the sum type.
 
-   | TimeIt EXP dec Bool
+   | TimeIt (PreExp ext loc dec) dec Bool
     -- ^ The boolean being true indicates this TimeIt is really (iterate _)
     -- This iterate form is used for criterion-style benchmarking.
 
-   | WithArenaE Var EXP
+   | WithArenaE Var (PreExp ext loc dec)
 
-   | SpawnE Var [loc] [EXP]
+   | SpawnE Var [loc] [PreExp ext loc dec]
    | SyncE
 
    -- Limited list handling:
    -- TODO: RENAME to "Array".
    -- TODO: Replace with Generate, add array reference.
-   | MapE  (Var,dec, EXP) EXP
-   | FoldE { initial  :: (Var,dec,EXP)
-           , iterator :: (Var,dec,EXP)
-           , body     :: EXP }
+   | MapE  (Var,dec, PreExp ext loc dec) (PreExp ext loc dec)
+   | FoldE { initial  :: (Var,dec,PreExp ext loc dec)
+           , iterator :: (Var,dec,PreExp ext loc dec)
+           , body     :: PreExp ext loc dec }
 
    ----------------------------------------
   | Ext (ext loc dec) -- ^ Extension point for downstream language extensions.
@@ -715,9 +715,9 @@ data Value e = VInt Int
              | VSym String
              | VBool Bool
              | VDict (M.Map (Value e) (Value e))
-             | VProd [(Value e)]
-             | VList [(Value e)]
-             | VPacked DataCon [(Value e)]
+             | VProd [Value e]
+             | VList [Value e]
+             | VPacked DataCon [Value e]
              | VLoc { bufID :: Var, offset :: Int }
              | VCursor { bufID :: Var, offset :: Int }
              | VPtr { bufID :: Var, offset :: Int }
@@ -733,27 +733,29 @@ instance Out e => Out (Value e)
 instance NFData e => NFData (Value e)
 
 instance Show e => Show (Value e) where
- show v =
-  case v of
-   VInt n   -> show n
-   VChar c  -> show c
-   VFloat n -> show n
-   VSym s   -> "'" ++ s
-   VBool b  -> if b then truePrinted else falsePrinted
+ show v = case v of
+  VInt n   -> show n
+  VChar c  -> show c
+  VFloat n -> show n
+  VSym s   -> "'" ++ s
+  VBool b  -> if b then truePrinted else falsePrinted
 -- TODO: eventually want Haskell style tuple-printing:
 --    VProd ls -> "("++ concat(intersperse ", " (L.map show ls)) ++")"
 -- For now match Gibbon's Racket backend
-   VProd [] -> ""
-   VProd ls -> "'#("++ concat(L.intersperse " " (L.map show ls)) ++")"
-   VList ls -> show ls
-   VDict m      -> show (M.toList m)
-   -- For now, Racket style:
-   VPacked k ls -> "(" ++ k ++ concat (L.map ((" "++) . show) ls) ++ ")"
-   VLoc buf off -> "<location "++show buf++", "++show off++">"
-   VCursor idx off -> "<cursor "++show idx++", "++show off++">"
-   VPtr idx off -> "<ptr "++show idx++", "++show off++">"
-   VLam args bod env -> "(Clos (lambda (" ++ concat (map ((++" ") . show) args) ++ ") " ++ show bod ++ ") #{" ++ show env ++ "})"
-   VWrapId vid val -> "(id: " ++ show vid ++ " " ++ show val ++ ")"
+  VProd [] -> ""
+  VProd ls -> mconcat ["'#(", unwords (L.map show ls), ")"]
+  VList ls -> show ls
+  VDict m  -> show (M.toList m)
+  -- For now, Racket style:
+  VPacked k ls -> mconcat ["(", k, concatMap ((" " ++) . show) ls, ")"]
+  VLoc buf off -> mconcat ["<location ", show buf, ", ", show off, ">"]
+  VCursor idx off -> mconcat ["<cursor ", show idx, ", ", show off, ">"]
+  VPtr idx off -> mconcat ["<ptr ", show idx, ", ", show off, ">"]
+  VLam args bod env -> mconcat 
+    [ "(Clos (lambda (",  concatMap ((++ " ") . show) args, ") "
+    , show bod, ") #{", show env, "})"
+    ]
+  VWrapId vid val -> mconcat ["(id: ", show vid, " ", show val, ")"]
 
 execAndPrint :: (InterpProg s ex) => s -> RunConfig -> Prog ex -> IO ()
 execAndPrint s rc prg = do
