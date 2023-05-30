@@ -31,6 +31,7 @@ import           Gibbon.Language.Constants
 import           Gibbon.Language.Syntax
 import           Gibbon.Common
 import GHC.Stack
+import qualified Data.Bifunctor
 
 --------------------------------------------------------------------------------
 
@@ -40,7 +41,7 @@ instance (Out l, Show l, Show d, Out d, Expression (e l d))
   type (LocOf (PreExp e l d)) = l
   isTrivial = f
     where
-      f :: (PreExp e l d) -> Bool
+      f :: PreExp e l d -> Bool
       f e =
        case e of
         VarE _     -> True
@@ -82,14 +83,14 @@ instance FreeVars (e l d) => FreeVars (PreExp e l d) where
       LitSymE _ -> S.empty
       ProjE _ e -> gFreeVars e
       IfE a b c -> gFreeVars a `S.union` gFreeVars b `S.union` gFreeVars c
-      AppE v _ ls         -> S.unions $ (S.singleton v) : (L.map gFreeVars ls)
+      AppE v _ ls         -> S.unions $ S.singleton v : L.map gFreeVars ls
       PrimAppE _ ls        -> S.unions (L.map gFreeVars ls)
       LetE (v,_,_,rhs) bod -> gFreeVars rhs `S.union`
                               S.delete v (gFreeVars bod)
       CaseE e ls -> S.union (gFreeVars e)
                     (S.unions $ L.map (\(_, vlocs, ee) ->
                                            let (vars,_) = unzip vlocs
-                                           in (gFreeVars ee) `S.difference` (S.fromList vars))
+                                           in gFreeVars ee `S.difference` S.fromList vars)
                                 ls)
       MkProdE ls          -> S.unions $ L.map gFreeVars ls
       DataConE _ _ ls     -> S.unions $ L.map gFreeVars ls
@@ -98,11 +99,11 @@ instance FreeVars (e l d) => FreeVars (PreExp e l d) where
                              S.delete v (gFreeVars bod)
       FoldE (v1,_t1,r1) (v2,_t2,r2) bod ->
           gFreeVars r1 `S.union` gFreeVars r2 `S.union`
-          (S.delete v1 $ S.delete v2 $ gFreeVars bod)
+          S.delete v1 (S.delete v2 $ gFreeVars bod)
 
       WithArenaE v e -> S.delete v $ gFreeVars e
 
-      SpawnE v _ ls -> S.unions $ (S.singleton v) : (L.map gFreeVars ls)
+      SpawnE v _ ls -> S.unions $ S.singleton v : L.map gFreeVars ls
       SyncE -> S.empty
 
       Ext q -> gFreeVars q
@@ -170,7 +171,7 @@ instance HasRenamable e l d => Renamable (PreExp e l d) where
       MkProdE ls -> MkProdE (gol ls)
       ProjE i e  -> ProjE i (go e)
       CaseE scrt ls ->
-        CaseE (go scrt) (map (\(a,b,c) -> (a, map (\(d,e) -> (go d, go e)) b, go c)) ls)
+        CaseE (go scrt) (map (\(a,b,c) -> (a, map (Data.Bifunctor.bimap go go) b, go c)) ls)
       DataConE loc dcon ls -> DataConE (go loc) dcon (gol ls)
       TimeIt e ty b -> TimeIt (go e) (go ty) b
       SpawnE f locs args -> SpawnE (go f) (gol locs) (gol args)
@@ -184,7 +185,7 @@ instance HasRenamable e l d => Renamable (PreExp e l d) where
        go = gRename env
 
        gol :: forall a. Renamable a => [a] -> [a]
-       gol ls = map go ls
+       gol = map go
 
 instance Renamable a => Renamable (UrTy a) where
   gRename env = fmap (gRename env)
@@ -230,9 +231,9 @@ mapMExprs fn prg@Prog{fundefs,mainExp} = do
 visitExp :: forall l1 l2 e1 e2 d1 d2 .
             (l1 -> l2) -> (e1 l1 d1 -> e2 l2 d2) -> (d1 -> d2) ->
             PreExp e1 l1 d1 -> PreExp e2 l2  d2
-visitExp _fl fe _fd exp0 = go exp0
+visitExp _fl fe _fd = go
  where
-   go :: (PreExp e1 l1  d1) -> (PreExp e2 l2 d2)
+   go :: PreExp e1 l1  d1 -> PreExp e2 l2 d2
    go ex =
      case ex of
        Ext  x  -> Ext (fe x)
@@ -241,7 +242,7 @@ visitExp _fl fe _fd exp0 = go exp0
 
 -- | Substitute an expression in place of a variable.
 subst :: HasSubstitutable e l d
-      => Var -> (PreExp e l d) -> (PreExp e l d) -> (PreExp e l d)
+      => Var -> PreExp e l d -> PreExp e l d -> PreExp e l d
 subst old new ex =
   let go = subst old new in
   case ex of
@@ -258,7 +259,7 @@ subst old new ex =
     ProjE i e  -> ProjE i (go e)
     CaseE e ls ->
                   CaseE (go e) (L.map f ls)
-                      where f (c,vs,er) = if L.elem old (L.map fst vs)
+                      where f (c,vs,er) = if old `elem` L.map fst vs
                                           then (c,vs,er)
                                           else (c,vs,go er)
     MkProdE ls        -> MkProdE $ L.map go ls
@@ -285,7 +286,7 @@ subst old new ex =
 -- | Expensive 'subst' that looks for a whole matching sub-EXPRESSION.
 -- If the old expression is a variable, this still avoids going under binder.
 substE :: HasSubstitutable e l d
-       => (PreExp e l d) -> (PreExp e l d) -> (PreExp e l d) -> (PreExp e l d)
+       => PreExp e l d -> PreExp e l d -> PreExp e l d -> PreExp e l d
 substE old new ex =
   let go = substE old new in
   case ex of
@@ -298,7 +299,7 @@ substE old new ex =
     LitSymE _       -> ex
     AppE v loc ls   -> AppE v loc (map go ls)
     PrimAppE p ls   -> PrimAppE p $ L.map go ls
-    LetE (v,loc,t,rhs) bod | (VarE v) == old  -> LetE (v,loc,t,go rhs) bod
+    LetE (v,loc,t,rhs) bod | VarE v == old  -> LetE (v,loc,t,go rhs) bod
                            | otherwise -> LetE (v,loc,t,go rhs) (go bod)
 
     ProjE i e         -> ProjE i (go e)
@@ -318,29 +319,29 @@ substE old new ex =
 
     Ext ext -> Ext (gSubstEExt old new ext)
 
-    WithArenaE v e | (VarE v) == old -> WithArenaE v e
+    WithArenaE v e | VarE v == old -> WithArenaE v e
                    | otherwise -> WithArenaE v (go e)
 
 
 -- | Does the expression contain a TimeIt form?
-hasTimeIt :: (PreExp e l d) -> Bool
+hasTimeIt :: PreExp e l d -> Bool
 hasTimeIt rhs =
     case rhs of
-      TimeIt _ _ _ -> True
+      TimeIt {} -> True
       DataConE{}   -> False
       VarE _       -> False
       LitE _       -> False
       CharE _      -> False
       FloatE{}     -> False
       LitSymE _    -> False
-      AppE _ _ _   -> False
+      AppE {}   -> False
       PrimAppE _ _ -> False
       ProjE _ e    -> hasTimeIt e
       MkProdE ls   -> any hasTimeIt ls
       IfE a b c    -> hasTimeIt a || hasTimeIt b || hasTimeIt c
       CaseE _ ls   -> any hasTimeIt [ e | (_,_,e) <- ls ]
       LetE (_,_,_,e1) e2 -> hasTimeIt e1 || hasTimeIt e2
-      SpawnE _ _ _       -> False
+      SpawnE {}       -> False
       SyncE              -> False
       MapE (_,_,e1) e2   -> hasTimeIt e1 || hasTimeIt e2
       FoldE (_,_,e1) (_,_,e2) e3 -> hasTimeIt e1 || hasTimeIt e2 || hasTimeIt e3
@@ -355,7 +356,7 @@ hasSpawnsProg (Prog _ fundefs mainExp) =
       Just (e,_ty) -> hasSpawns e
 
 -- | Does the expression contain a SpawnE form?
-hasSpawns :: (PreExp e l d) -> Bool
+hasSpawns :: PreExp e l d -> Bool
 hasSpawns rhs =
     case rhs of
       DataConE{}   -> False
@@ -381,38 +382,36 @@ hasSpawns rhs =
       WithArenaE _ e -> hasSpawns e
 
 -- | Project something which had better not be the first thing in a tuple.
-projNonFirst :: (Out l, Out d, Out (e l d)) => Int -> (PreExp e l d) -> (PreExp e l d)
+projNonFirst :: (Out l, Out d, Out (e l d)) => Int -> PreExp e l d -> PreExp e l d
 projNonFirst 0 e = error $ "projNonFirst: expected nonzero index into expr: " ++ sdoc e
 projNonFirst i e = ProjE i e
 
 -- | Smart constructor that immediately destroys products if it can:
 -- Does NOT avoid single-element tuples.
-mkProj :: Int -> (PreExp e l d) -> (PreExp e l d)
+mkProj :: Int -> PreExp e l d -> PreExp e l d
 mkProj ix (MkProdE ls) = ls !! ix
-mkProj ix e = (ProjE ix e)
+mkProj ix e = ProjE ix e
 
 -- | Make a product type while avoiding unary products.
-mkProd :: [(PreExp e l d)]-> (PreExp e l d)
+mkProd :: [PreExp e l d]-> PreExp e l d
 mkProd [e] = e
 mkProd ls  = MkProdE ls
 
 -- | Make a nested series of lets.
-mkLets :: [(Var, [loc], dec, (PreExp ext loc dec))] -> (PreExp ext loc dec) -> (PreExp ext loc dec)
-mkLets [] bod     = bod
-mkLets (b:bs) bod = LetE b (mkLets bs bod)
+mkLets :: [(Var, [loc], dec, PreExp ext loc dec)] -> PreExp ext loc dec -> PreExp ext loc dec
+mkLets bs bod = foldr LetE bod bs
 
 -- | Helper function that lifts out Lets on the RHS of other Lets.
 -- Absolutely requires unique names.
-mkLetE :: (Var, [l], d, (PreExp e l d)) -> (PreExp e l d) -> (PreExp e l d)
-mkLetE (vr,lvs,ty,(LetE bnd e)) bod = mkLetE bnd $ mkLetE (vr,lvs,ty,e) bod
+mkLetE :: (Var, [l], d, PreExp e l d) -> PreExp e l d -> PreExp e l d
+mkLetE (vr,lvs,ty,LetE bnd e) bod = mkLetE bnd $ mkLetE (vr,lvs,ty,e) bod
 mkLetE bnd bod = LetE bnd bod
 
 -- | Alternative version of L1.mkLets that also flattens
-flatLets :: [(Var,[l],d,(PreExp e l d))] -> (PreExp e l d) -> (PreExp e l d)
-flatLets [] bod = bod
-flatLets (b:bs) bod = mkLetE b (flatLets bs bod)
+flatLets :: [(Var,[l],d,PreExp e l d)] -> PreExp e l d -> PreExp e l d
+flatLets bs bod = foldr mkLetE bod bs
 
-tuplizeRefs :: Var -> [Var] -> [d] -> (PreExp e l d) -> (PreExp e l d)
+tuplizeRefs :: Var -> [Var] -> [d] -> PreExp e l d -> PreExp e l d
 tuplizeRefs ref vars tys =
   mkLets $
     L.map (\(v,ty,ix) -> (v,[],ty,mkProj ix (VarE ref))) (L.zip3 vars tys [0..])
@@ -444,9 +443,7 @@ isProdTy _ = False
 isNestedProdTy :: UrTy a -> Bool
 isNestedProdTy ty =
   case ty of
-    ProdTy tys -> if any isProdTy tys
-                  then True
-                  else False
+    ProdTy tys -> any isProdTy tys
     _ -> False
 
 -- | Are values of this type Packed ?
@@ -637,7 +634,7 @@ primArgsTy p =
     Write3dPpmFile{} -> error "primArgsTy: Write3dPpmFile not handled yet"
 
 -- | Return type for a primitive operation.
-primRetTy :: Prim (UrTy a) -> (UrTy a)
+primRetTy :: Prim (UrTy a) -> UrTy a
 primRetTy p =
   case p of
     AddP -> IntTy
@@ -766,5 +763,4 @@ assertTriv e =
 
 -- | List version of 'assertTriv'.
 assertTrivs :: (HasCallStack, Expression e) => [e] -> a -> a
-assertTrivs [] = id
-assertTrivs (a:b) = assertTriv a . assertTrivs b
+assertTrivs = foldr ((.) . assertTriv) id

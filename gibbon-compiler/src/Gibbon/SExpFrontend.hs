@@ -5,6 +5,8 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# OPTIONS_GHC -fdefer-typed-holes #-}
 {-# OPTIONS_GHC -fno-warn-missing-pattern-synonym-signatures #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use $>" #-}
 
 -- |  Parse an SExp representaton of our tree-walk language.
 
@@ -91,7 +93,7 @@ treelangParser =
         comment  = string ";"      *> eatline
         eatline  = manyTill anyChar newline *> pure ()
         quote expr     = SCons (SAtom "quote") (SCons expr SNil)
-        addQuoteReader = addReader '\'' (\ parse -> fmap quote parse)
+        addQuoteReader = addReader '\'' (fmap quote)
     in
     -- setCarrier (return . asRich) $
         setComment (comment <|> langline) $
@@ -114,7 +116,7 @@ bracketHacks = T.map $ \case '[' -> '('
 tagDataCons :: DDefs Ty0 -> Exp0 -> PassM Exp0
 tagDataCons ddefs = go allCons
   where
-   allCons = S.fromList [ (toVar con)
+   allCons = S.fromList [  toVar con
                         | DDef{dataCons} <- M.elems ddefs
                         , (con,_tys) <- dataCons ]
 
@@ -125,7 +127,7 @@ tagDataCons ddefs = go allCons
        AppE v _ ls
                   | S.member v cons -> do
                       ty <- newMetaTy
-                      DataConE ty (fromVar v) <$> (mapM (go cons) ls)
+                      DataConE ty (fromVar v) <$> mapM (go cons) ls
        AppE v l ls | S.member v cons -> do ty <- newMetaTy
                                            DataConE ty (fromVar v) <$> mapM (go cons) ls
                    | otherwise       -> AppE v l <$> mapM (go cons) ls
@@ -133,7 +135,7 @@ tagDataCons ddefs = go allCons
        SpawnE v _ ls
                   | S.member v cons -> do
                       ty <- newMetaTy
-                      DataConE ty (fromVar v) <$> (mapM (go cons) ls)
+                      DataConE ty (fromVar v) <$> mapM (go cons) ls
        SpawnE v l ls | S.member v cons -> do ty <- newMetaTy
                                              DataConE ty (fromVar v) <$> mapM (go cons) ls
                    | otherwise       -> SpawnE v l <$> mapM (go cons) ls
@@ -142,7 +144,7 @@ tagDataCons ddefs = go allCons
          let go' = if S.member v cons
                       then go (S.delete v cons)
                       else go cons
-         LetE <$> (v,l,t,) <$> go' rhs <*> (go' bod)
+         LetE . (v,l,t,) <$> go' rhs <*> go' bod
        ------------boilerplate------------
        VarE{}          -> pure ex
        LitSymE{}       -> pure ex
@@ -150,23 +152,23 @@ tagDataCons ddefs = go allCons
        CharE _         -> pure ex
        FloatE _        -> pure ex
        PrimAppE p ls   -> PrimAppE p <$> mapM (go cons) ls
-       ProjE i e  -> ProjE i <$> (go cons e)
-       CaseE e ls -> CaseE <$> (go cons e) <*> (mapM (\(c,vs,er) -> (c,vs,) <$> go cons er) ls)
+       ProjE i e  -> ProjE i <$> go cons e
+       CaseE e ls -> CaseE <$> go cons e <*> mapM (\(c,vs,er) -> (c,vs,) <$> go cons er) ls
        MkProdE ls     -> MkProdE <$> mapM (go cons) ls
        DataConE loc k ls -> DataConE loc k <$> mapM (go cons) ls
-       TimeIt e t b -> do e' <- (go cons e)
+       TimeIt e t b -> do e' <- go cons e
                           pure $ TimeIt e' t b
-       IfE a b c -> IfE <$> (go cons a) <*> (go cons b) <*> (go cons c)
-       WithArenaE v e -> WithArenaE v <$> (go cons e)
+       IfE a b c -> IfE <$> go cons a <*> go cons b <*> go cons c
+       WithArenaE v e -> WithArenaE v <$> go cons e
 
-       MapE  (v,t,e) bod -> MapE <$> (v,t, ) <$> go cons e <*> (go cons bod)
+       MapE  (v,t,e) bod -> MapE . (v,t, ) <$> go cons e <*> go cons bod
        FoldE (v1,t1,e1) (v2,t2,e2) b -> do
          e1' <- go cons e1
          e2' <- go cons e2
          b'  <- go cons b
          pure $ FoldE (v1,t1,e1') (v2,t2,e2') b'
        SyncE -> pure SyncE
-       Ext (LambdaE bnds e) -> Ext <$> (LambdaE bnds) <$> (go cons e)
+       Ext (LambdaE bnds e) -> Ext . LambdaE bnds <$> go cons e
        Ext (PolyAppE a b)   -> do
          a' <- go cons a
          b' <- go cons b
@@ -175,12 +177,12 @@ tagDataCons ddefs = go allCons
        Ext (BenchE v tyapps es b) -> do
          es' <- mapM (go cons) es
          pure $ Ext $ BenchE v tyapps es' b
-       Ext (ParE0 ls) -> Ext <$> ParE0 <$> mapM (go cons) ls
-       Ext (PrintPacked ty arg) -> Ext <$> (PrintPacked ty) <$> go cons arg
-       Ext (CopyPacked ty arg) -> Ext <$> (CopyPacked ty) <$> go cons arg
-       Ext (TravPacked ty arg) -> Ext <$> (TravPacked ty) <$> go cons arg
-       Ext (L p e)    -> Ext <$> (L p) <$> go cons e
-       Ext (LinearExt{}) -> error $ "tagDataCons: SExpFrontend doesn't support linear types yet."
+       Ext (ParE0 ls) -> Ext . ParE0 <$> mapM (go cons) ls
+       Ext (PrintPacked ty arg) -> Ext . PrintPacked ty <$> go cons arg
+       Ext (CopyPacked ty arg) -> Ext . CopyPacked ty <$> go cons arg
+       Ext (TravPacked ty arg) -> Ext . TravPacked ty <$> go cons arg
+       Ext (L p e)    -> Ext . L p <$> go cons e
+       Ext (LinearExt{}) -> error "tagDataCons: SExpFrontend doesn't support linear types yet."
 
 
 -- | Convert from raw, unstructured S-Expression into the L1 program datatype we expect.
@@ -220,10 +222,10 @@ if a thing is a type variable or a data constructor.
      (Ls (A _ "data": A _ tycon  : cs) : rst) -> do
        let tycon' = textToVar tycon
        case cs of
-         [] -> go rst ((DDef tycon' [] []) : dds) fds cds mn
+         [] -> go rst (DDef tycon' [] [] : dds) fds cds mn
          (Ls k) : ks ->
            case k of
-             [] -> go rst ((DDef tycon' [] (L.map docasety cs)) : dds) fds cds mn
+             [] -> go rst (DDef tycon' [] (L.map docasety cs) : dds) fds cds mn
              (A _ tyvar_or_constr : _) ->
                if isTyVar tyvar_or_constr
                then do let tyargs = L.map (UserTv . getSym) k
@@ -331,7 +333,7 @@ falseE = PrimAppE MkFalse []
 -- hackySymbol s = product (L.map ord s)
 
 keywords :: S.Set Text
-keywords = S.fromList $ L.map pack $
+keywords = S.fromList $ L.map pack
            [ "quote", "if", "or", "and", "time", "let", "let*"
            , "case", "vector-ref", "for/fold", "for/list"
            , "insert", "empty-dict", "lookup", "error", "ann"
@@ -344,8 +346,8 @@ isKeyword s = s `S.member` keywords
 exp :: Sexp -> PassM Exp0
 exp se =
  case se of
-   A l "True"  -> pure $ Ext $ L (toLoc l) $ trueE
-   A l "False" -> pure $ Ext $ L (toLoc l) $ falseE
+   A l "True"  -> pure $ Ext $ L (toLoc l) trueE
+   A l "False" -> pure $ Ext $ L (toLoc l) falseE
 
    Ls [A _ "void"] -> pure $ MkProdE []
 
@@ -354,7 +356,7 @@ exp se =
    Ls ((A l "and") : args)  -> go args
      where
        go :: [Sexp] -> PassM Exp0
-       go [] = pure $ trueE
+       go [] = pure trueE
        go (x:xs) = do
          x'  <- exp x
          xs' <- go xs
@@ -363,15 +365,15 @@ exp se =
    Ls ((A l "or") : args)  -> go args
      where
        go :: [Sexp] -> PassM Exp0
-       go [] = pure $ falseE
+       go [] = pure falseE
        go (x:xs) = do
          x'  <- exp x
          xs' <- go xs
          pure $ Ext $ L (toLoc l) $ IfE x' trueE xs'
 
    Ls4 l "if" test conseq altern -> do
-     e' <- IfE <$> (exp test) <*> (exp conseq) <*> (exp altern)
-     pure $ Ext $ L (toLoc l) $  e'
+     e' <- IfE <$> exp test <*> exp conseq <*> exp altern
+     pure $ Ext $ L (toLoc l) e'
 
    Ls2 l "quote" (A _ v) -> pure $ Ext $ L (toLoc l) $ LitSymE (textToVar v)
 
@@ -382,9 +384,8 @@ exp se =
      vec <- gensym (toVar "vec")
      let n = T.length txt
          init_vec = LetE (vec,[],VectorTy CharTy, PrimAppE (VAllocP CharTy) [LitE n])
-         fn i c b = LetE ("_",[],VectorTy CharTy,
+         fn i c = LetE ("_",[],VectorTy CharTy,
                           PrimAppE (InplaceVUpdateP CharTy) [VarE vec, LitE i, CharE c])
-                    b
          add_chars = foldr (\(i,chr) acc -> fn i chr acc) (VarE vec)
                        (reverse $ zip [0..n-1] (T.unpack txt))
      pure $ Ext $ L (toLoc l) $ init_vec add_chars
@@ -409,9 +410,9 @@ exp se =
    Ls3 l "let" (Ls bnds) bod ->
      -- mkLets tacks on NoLoc's for every expression.
      -- Here, we remove the outermost NoLoc and tag with original src location
-     Ext <$> L (toLoc l) <$> (mkLets <$> (mapM letbind bnds) <*> (exp bod))
+     Ext . L (toLoc l) <$> (mkLets <$> mapM letbind bnds <*> exp bod)
 
-   Ls3 l "let*" (Ls []) bod -> Ext <$> L (toLoc l) <$> exp bod
+   Ls3 l "let*" (Ls []) bod -> Ext . L (toLoc l) <$> exp bod
 
    Ls3 l "let*" (Ls (bnd:bnds)) bod -> do
      bnd'  <- letbind bnd
@@ -420,10 +421,10 @@ exp se =
      pure $ Ext $ L (toLoc l) $ mkLets [bnd'] bnds'
 
    Ls (A l "case": scrut: cases) -> do
-     e' <- CaseE <$> (exp scrut) <*> (mapM docase cases)
-     pure $ Ext $ L (toLoc l) $ e'
+     e' <- CaseE <$> exp scrut <*> mapM docase cases
+     pure $ Ext $ L (toLoc l) e'
 
-   Ls (A l p : ls) | isPrim p -> Ext <$> L (toLoc l) <$> PrimAppE (prim p) <$> mapM exp ls
+   Ls (A l p : ls) | isPrim p -> (Ext <$> L (toLoc l)) . PrimAppE (prim p) <$> mapM exp ls
 
    Ls (A l "lambda" : Ls args : [bod]) -> do
      -- POLICY DECISION:
@@ -431,7 +432,7 @@ exp se =
      -- Right now, we don't and initialize them with meta type variables.
      let args' = L.map getSym args
      bod' <- exp bod
-     tys <- mapM  (\_ -> newMetaTy) args'
+     tys <- mapM  (const newMetaTy) args'
      pure $ Ext $ L (toLoc l) $ Ext $ LambdaE (zip args' tys) bod'
 
    Ls2 l "print-packed" arg -> do
@@ -472,9 +473,9 @@ exp se =
      pure $ Ext (L (toLoc l) (PrimAppE (EqBenchProgP (T.unpack str)) []))
 
    Ls3 l "vector-ref" evec (G _ (HSInt ind)) ->
-     Ext <$> L (toLoc l) <$> ProjE (fromIntegral ind) <$> (exp evec)
+     (Ext <$> L (toLoc l)) . ProjE (fromIntegral ind) <$> exp evec
 
-   Ls (A l "par" : es) -> Ext <$> L (toLoc l) <$> Ext <$> ParE0 <$> mapM exp es
+   Ls (A l "par" : es) -> (Ext . L (toLoc l) <$> Ext) . ParE0 <$> mapM exp es
 
    Ls2 l1 "spawn" app -> do
      appe <- exp app
@@ -483,8 +484,7 @@ exp se =
        (AppE f locs args) -> pure $ Ext $ L (toLoc l1) $ SpawnE f locs args
        _ -> error $ "Only function calls can be spawn'd. Got: " ++ show app
 
-   Ls (A l1 "sync":[]) -> do
-       pure $ Ext $ L (toLoc l1) SyncE
+   Ls [A l1 "sync"] -> pure $ Ext $ L (toLoc l1) SyncE
 
    Ls3 l0 "is-big" i e -> do
        ie <- exp i
@@ -509,7 +509,7 @@ exp se =
      let v' = getSym v
      pure $ Ext $ L (toLoc l) $ WithArenaE v' e'
 
-   Ls (A l "vector" : es) -> Ext <$> L (toLoc l) <$> MkProdE <$> mapM exp es
+   Ls (A l "vector" : es) -> (Ext <$> L (toLoc l)) . MkProdE <$> mapM exp es
 
    -- Dictionaries require type annotations for now.  No inference!
    Ls3 l "ann" (Ls2 _ "empty-dict" a) (Ls3 _ "SymDict" b ty) -> do
@@ -547,7 +547,7 @@ exp se =
        _ -> error$ "bad argument to 'error' primitive: "++prnt arg
 
    -- Other annotations are dropped:
-   Ls3 l "ann" e _ty -> Ext <$> L (toLoc l) <$> exp e
+   Ls3 l "ann" e _ty -> Ext . L (toLoc l) <$> exp e
 
    -- List operations
    Ls2 l "valloc" i -> do
@@ -620,7 +620,7 @@ exp se =
    -- If NOTHING else matches, we are an application.  Be careful we didn't miss anything:
    Ls (A l rator : rands) ->
      let app = AppE (textToVar rator) []
-     in Ext <$> L (toLoc l) <$> app <$> mapM exp rands
+     in (Ext <$> L (toLoc l)) . app <$> mapM exp rands
 
    _ -> error $ "Expression form not handled (yet):\n  "++
                show se ++ "\nMore concisely:\n  "++ prnt se
@@ -706,13 +706,13 @@ handleRequire baseFile (l:ls) =
     -- (Ls2 "require" arg) -> do
        ls' <- handleRequire baseFile ls
        let file = case arg of
-                    RSAtom (SC.At _ (HSString str)) -> (takeDirectory baseFile) </> (unpack str)
-                    _ -> error $ "bad require line: " ++ (show arg)
+                    RSAtom (SC.At _ (HSString str)) -> takeDirectory baseFile </> unpack str
+                    _ -> error $ "bad require line: " ++ show arg
        dbgPrintLn lvl $ "Including required file: "++show file
-       txt <- fmap bracketHacks $ readFile file
+       txt <- bracketHacks <$> readFile file
        dbgPrintLn lvl $ "Parsing required text: "++show txt
        let res :: Either String [RichSExpr (SC.Located HaskLikeAtom)]
-           res = fmap (fmap toRich) $
+           res = fmap toRich <$>
                  decode treelangParser txt
        case res of
          Left err -> error err
@@ -725,12 +725,12 @@ handleRequire baseFile (l:ls) =
 -- ^ Parse a file to an L1 program.  Return also the gensym counter.
 parseFile :: FilePath -> IO (PassM Prog0)
 parseFile file = do
-  txt    <- fmap bracketHacks $
+  txt    <- bracketHacks <$>
             -- fmap stripHashLang $
             readFile file
   dbgPrintLn lvl $ "Parsing text: "++show txt
   let res :: Either String [RichSExpr (SC.Located HaskLikeAtom)]
-      res = fmap (fmap toRich) $
+      res = fmap toRich <$>
             decode treelangParser txt
   dbgPrintLn lvl "Result of parsing:"
   case res of

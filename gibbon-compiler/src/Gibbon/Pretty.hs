@@ -67,10 +67,10 @@ instance HasPretty ex => Pretty (Prog ex) where
 renderMain :: Bool -> Doc -> Doc -> Doc
 renderMain has_bench m ty =
   if has_bench
-  then (text "gibbon_main" <+> doublecolon <+> "IO ()" $+$
-        text "gibbon_main" <+> equals <+> text "do" $$ nest indentLevel m)
-  else (text "gibbon_main" <+> doublecolon <+> ty $+$
-        text "gibbon_main" <+> equals <+> nest indentLevel m)
+  then text "gibbon_main" <+> doublecolon <+> "IO ()" $+$
+        text "gibbon_main" <+> equals <+> text "do" $$ nest indentLevel m
+  else text "gibbon_main" <+> doublecolon <+> ty $+$
+        text "gibbon_main" <+> equals <+> nest indentLevel m
 
 
 -- Things we need to make this a valid compilation unit for GHC:
@@ -95,7 +95,7 @@ ghc_compat_prefix has_bench =
   text "" $+$
   text "" $+$
   (if has_bench
-   then (text "import Criterion (nf, benchmark, bench)" $+$
+   then text "import Criterion (nf, benchmark, bench)" $+$
          text "import Control.DeepSeq (force, NFData)" $+$
          text "import GHC.Generics" $+$
          text "import System.Mem (performMajorGC)" $+$
@@ -105,10 +105,10 @@ ghc_compat_prefix has_bench =
          text "gibbon_bench :: (NFData a, NFData b) => String -> (a -> b) -> a -> IO ()" $+$
          text "gibbon_bench str fn arg = benchmark (nf fn (force arg))" $+$
          text "" $+$
-         text "")
-   else (text "gibbon_bench :: String -> (a -> b) -> a -> b" $+$
+         text ""
+   else text "gibbon_bench :: String -> (a -> b) -> a -> b" $+$
          text "gibbon_bench _str fn arg = fn arg" $+$
-         text "" $+$ empty)) $+$
+         text "" $+$ empty) $+$
   text "type Sym = String" $+$
   text "" $+$
   text "type Dict a = [(Sym,a)]" $+$
@@ -170,7 +170,7 @@ instance HasPretty ex => Pretty (FunDef ex) where
             $$ renderBod <> text "\n"
       where
         renderBod :: Doc
-        renderBod = text (fromVar funName) <+> (pprintWithStyle sty funArgs) <+> equals
+        renderBod = text (fromVar funName) <+> pprintWithStyle sty funArgs <+> equals
                       $$ nest indentLevel (pprintWithStyle sty funBody)
 
 -- Datatypes
@@ -316,7 +316,7 @@ instance Pretty ArrowTy2 where
     pprintWithStyle sty fnty =
         case sty of
           PPHaskell ->
-            (hsep $ punctuate " ->" $ map (pprintWithStyle sty) (arrIns fnty)) <+> text "->" <+> pprintWithStyle sty (arrOut fnty)
+            hsep (punctuate " ->" $ map (pprintWithStyle sty) (arrIns fnty)) <+> text "->" <+> pprintWithStyle sty (arrOut fnty)
           PPInternal ->
             pprintWithStyle PPHaskell fnty $$
               braces (text "locvars" <+> doc (locVars fnty) <> comma $$
@@ -331,7 +331,7 @@ instance Pretty ArrowTy2 where
 type HasPrettyToo e l d = (Show d, Ord d, Eq d, Pretty d, Pretty l, Pretty (e l d), TyOf (e l (UrTy l)) ~ TyOf (PreExp e l (UrTy l)))
 
 
-instance Pretty (PreExp e l d) => Pretty [(PreExp e l d)] where
+instance Pretty (PreExp e l d) => Pretty [PreExp e l d] where
     pprintWithStyle sty ls = hsep $ map (pprintWithStyle sty) ls
 
 instance HasPrettyToo e l d => Pretty (PreExp e l d) where
@@ -344,8 +344,8 @@ instance HasPrettyToo e l d => Pretty (PreExp e l d) where
           LitSymE v -> text "\"" <> pprintWithStyle sty v <> text "\""
           AppE v locs ls -> parens $
                              pprintWithStyle sty v <+>
-                             (brackets $ hcat (punctuate "," (map pprint locs))) <+>
-                             (pprintWithStyle sty ls)
+                             brackets (hcat (punctuate "," (map pprint locs))) <+>
+                             pprintWithStyle sty ls
           PrimAppE pr es ->
               case pr of
                   _ | pr `elem` [AddP, SubP, MulP, DivP, ModP, ExpP, EqSymP, EqIntP, LtP, GtP] ->
@@ -362,7 +362,7 @@ instance HasPrettyToo e l d => Pretty (PreExp e l d) where
                          PPHaskell  -> pprintWithStyle sty pr <+> hsep (punctuate " " $ map (pprintWithStyle sty) es)
                          PPInternal -> pprintWithStyle sty pr <> parens (hsep $ punctuate "," $ map (pprintWithStyle sty) es)
 
-          LetE (v,ls,ty,e1) e2 -> (text "let") <+>
+          LetE (v,ls,ty,e1) e2 -> text "let" <+>
                                   pprintWithStyle sty v <+> doublecolon <+>
                                   (if null ls
                                    then empty
@@ -399,11 +399,11 @@ instance HasPrettyToo e l d => Pretty (PreExp e l d) where
           TimeIt e _ty _b -> text "timeit" <+> parens (pprintWithStyle sty e)
           SpawnE v locs ls -> text "spawn" <+>
                                 parens (pprintWithStyle sty v <+>
-                                         (brackets $ hcat (punctuate "," (map pprint locs))) <+>
-                                         (pprintWithStyle sty ls))
+                                         brackets (hcat (punctuate "," (map pprint locs))) <+>
+                                         pprintWithStyle sty ls)
           SyncE -> text "sync"
           WithArenaE v e -> case sty of
-                              PPHaskell  -> (text "let") <+>
+                              PPHaskell  -> text "let" <+>
                                             pprintWithStyle sty v <+>
                                             equals <+>
                                             text "()" <+>
@@ -411,8 +411,8 @@ instance HasPrettyToo e l d => Pretty (PreExp e l d) where
                                             pprintWithStyle sty e
                               PPInternal -> text "letarena" <+> pprint v <+> text "in" $+$ pprint e
           Ext ext -> pprintWithStyle sty ext
-          MapE{} -> error $ "Unexpected form in program: MapE"
-          FoldE{} -> error $ "Unexpected form in program: FoldE"
+          MapE{} -> error "Unexpected form in program: MapE"
+          FoldE{} -> error "Unexpected form in program: FoldE"
         where
           dobinds (dc,vls,e) = text dc <+> hcat (punctuate (text " ")
                                                            (map (\(v,loc) -> if isEmpty (pprintWithStyle sty loc)
@@ -425,9 +425,9 @@ instance (Pretty l, Pretty d, Ord d, Show d) => Pretty (E1Ext l d) where
     pprintWithStyle sty ext =
       case ext of
         L1.AddFixed v i -> text "addFixed" <+> pprintWithStyle sty v <+> int i
-        BenchE fn tyapps args b -> text "gibbon_bench" <+> (doubleQuotes $ text "") <+> text (fromVar fn) <+>
-                                   (brackets $ hcat (punctuate "," (map pprint tyapps))) <+>
-                                   (pprintWithStyle sty args) <+> text (if b then "true" else "false")
+        BenchE fn tyapps args b -> text "gibbon_bench" <+> doubleQuotes (text "") <+> text (fromVar fn) <+>
+                                   brackets (hcat (punctuate "," (map pprint tyapps))) <+>
+                                   pprintWithStyle sty args <+> text (if b then "true" else "false")
 
 -- L2
 instance Pretty l => Pretty (L2.PreLocExp l) where
@@ -436,7 +436,7 @@ instance Pretty l => Pretty (L2.PreLocExp l) where
           StartOfLE r -> lparen <> text "startof" <+> text (sdoc r) <> rparen
           AfterConstantLE i loc   -> lparen <> pprint loc <+> text "+" <+> int i <> rparen
           AfterVariableLE v loc b -> if b
-                                     then text "fresh" <> (parens $ pprint loc <+> text "+" <+> doc v)
+                                     then text "fresh" <> parens (pprint loc <+> text "+" <+> doc v)
                                      else parens $ pprint loc <+> text "+" <+> doc v
           InRegionLE r  -> lparen <> text "inregion" <+> text (sdoc r) <> rparen
           FromEndLE loc -> lparen <> text "fromendle" <+> pprint loc <> rparen
@@ -503,10 +503,10 @@ instance Pretty L0.Ty0 where
         L0.SymDictTy (Just v) ty1 -> text "Dict" <+> pprint v <+> pprint ty1
         L0.SymDictTy Nothing  ty1 -> text "Dict" <+> pprint ty1
         L0.PDictTy k v -> text "PDict" <+> pprint k <+> pprint v
-        L0.ArrowTy as b  -> parens $ (hsep $ map (<+> "->") $ map (pprintWithStyle sty) as) <+> pprint b
+        L0.ArrowTy as b  -> parens $ hsep (map ((<+> "->") . pprintWithStyle sty) as) <+> pprint b
         L0.PackedTy tc loc -> parens $ text "Packed" <+> text tc <+> brackets (hcat (map (pprintWithStyle sty) loc))
-        L0.VectorTy el_ty1 -> text "Vector" <+> (pprintWithStyle sty el_ty1)
-        L0.ListTy el_ty1 -> text "List" <+> (pprintWithStyle sty el_ty1)
+        L0.VectorTy el_ty1 -> text "Vector" <+> pprintWithStyle sty el_ty1
+        L0.ListTy el_ty1 -> text "List" <+> pprintWithStyle sty el_ty1
         L0.ArenaTy    -> text "Arena"
         L0.SymSetTy   -> text "SymSet"
         L0.SymHashTy  -> text "SymHash"
@@ -521,11 +521,11 @@ instance (Out a, Pretty a) => Pretty (L0.E0Ext a L0.Ty0) where
     case ex0 of
       L0.LambdaE args bod -> parens (text "\\" <> parens (hsep (punctuate comma (map (\(v,ty) -> doc v <+> doublecolon <+> pprint ty) args))) <+> text "->"
                                          $$ nest indentLevel (pprint bod))
-      L0.FunRefE tyapps f -> parens $ text "fn:" <> pprintWithStyle sty f <+> (brackets $ hcat (punctuate "," (map pprint tyapps)))
+      L0.FunRefE tyapps f -> parens $ text "fn:" <> pprintWithStyle sty f <+> brackets (hcat (punctuate "," (map pprint tyapps)))
       L0.PolyAppE{} -> doc ex0
       L0.BenchE fn tyapps args b -> text "bench" <+> text (fromVar fn) <+>
-                                    (brackets $ hcat (punctuate "," (map pprint tyapps))) <+>
-                                    (pprintWithStyle sty args) <+> text (if b then "true" else "false")
+                                    brackets (hcat (punctuate "," (map pprint tyapps))) <+>
+                                    pprintWithStyle sty args <+> text (if b then "true" else "false")
       L0.ParE0 ls -> text "par" <+> lparen <> hcat (punctuate (text ", ") (map (pprintWithStyle sty) ls)) <> rparen
       L0.L _ e    -> pprintWithStyle sty e
       L0.PrintPacked ty arg -> text "printPacked" <+>
@@ -576,7 +576,7 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
                          else d
       ddefsDoc = vcat $ map (mb_derive_more . pprintWithStyle sty) $ M.elems ddefs
       funsDoc  = vcat $ map (ppFun env2) $ M.elems fundefs
-  in (ghc_compat_prefix main_has_bench) $+$ ddefsDoc $+$ funsDoc $+$ meDoc $+$ sfx
+  in ghc_compat_prefix main_has_bench $+$ ddefsDoc $+$ funsDoc $+$ meDoc $+$ sfx
   where
     -- | Verify some assumptions about BenchE.
     hasBenchE :: Exp1 -> Bool
@@ -594,16 +594,16 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
         PrimAppE{} -> False
         DataConE{} -> False
         ProjE _ _  -> False
-        IfE _ b c  -> (go b) || (go c)
+        IfE _ b c  -> go b || go c
         MkProdE _  -> False
         LetE _ bod -> go bod
-        CaseE _ mp -> any (== True) $ map (\(_,_,c) -> go c) mp
+        CaseE _ mp -> any ((== True) . (\(_,_,c) -> go c)) mp
         TimeIt{}   -> False
-        WithArenaE _ e -> (go e)
+        WithArenaE _ e -> go e
         SpawnE{}-> False
         SyncE   -> False
-        MapE{}  -> error $ "hasBenchE: TODO MapE"
-        FoldE{} -> error $ "hasBenchE: TODO FoldE"
+        MapE{}  -> error "hasBenchE: TODO MapE"
+        FoldE{} -> error "hasBenchE: TODO FoldE"
       where go = hasBenchE
 
     sty = PPHaskell
@@ -615,7 +615,7 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
       where
         env2' = extendsVEnv (M.fromList $ zip funArgs (inTys funTy)) env2
         renderBod :: Doc
-        renderBod = text (fromVar funName) <+> (hsep $ map (text . fromVar) funArgs) <+> equals
+        renderBod = text (fromVar funName) <+> hsep (map (text . fromVar) funArgs) <+> equals
                       $$ nest indentLevel (ppExp False env2' funBody)
 
     ppExp :: Bool -> Env2 Ty1 -> Exp1 -> Doc
@@ -627,7 +627,7 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
           FloatE i -> double i
           LitSymE v -> text "\"" <> pprintWithStyle sty v <> text "\""
           AppE v _locs ls -> pprintWithStyle sty v <+>
-                            (hsep $ map (ppExp monadic env2) ls)
+                            hsep (map (ppExp monadic env2) ls)
           PrimAppE pr es ->
               case pr of
                   _ | pr `elem` [AddP, SubP, MulP, DivP, ModP, ExpP, EqSymP, EqIntP, LtP, GtP] ->
@@ -650,7 +650,7 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
 
                 env2' = foldr (\((_,w),t) acc -> extendVEnv w t acc) env2 (zip indexed_vars tys)
 
-            in (text "let") <+>
+            in text "let" <+>
                vcat [bind_rhs (pprintWithStyle sty v) (ppExp monadic env2 e1),
                      bind_rhs (parens $ hcat $ punctuate (text ",") (map (pprintWithStyle sty . snd) indexed_vars)) (ppExp monadic env2 (VarE v))] <+>
                (if monadic
@@ -658,7 +658,7 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
                 else text "in") $+$
                ppExp monadic (extendVEnv v ty env2') e2'
 
-          LetE (v,_,ty,e1) e2  -> (text "let") <+>
+          LetE (v,_,ty,e1) e2  -> text "let" <+>
                                   pprintWithStyle sty v <+> doublecolon <+>
                                   empty <+>
                                   pprintWithStyle sty ty <+>
@@ -691,7 +691,7 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
                               parens $ text dc <+>
                               hsep (map (ppExp monadic env2) es)
           TimeIt e _ty _b -> text "timeit" <+> parens (ppExp monadic env2 e)
-          WithArenaE v e -> (text "let") <+>
+          WithArenaE v e -> text "let" <+>
                             pprintWithStyle sty v <+>
                             equals <+>
                             text "()" <+>
@@ -712,8 +712,8 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
                text "t2 <- getCurrentTime" $+$
                text "print (diffUTCTime t2 t1)" $+$
                text "print x"
-          MapE{} -> error $ "Unexpected form in program: MapE"
-          FoldE{}-> error $ "Unexpected form in program: FoldE"
+          MapE{} -> error "Unexpected form in program: MapE"
+          FoldE{}-> error "Unexpected form in program: FoldE"
         where
           dobinds env21 (dc,vls,e) =
                            let tys    = lookupDataCon ddefs dc

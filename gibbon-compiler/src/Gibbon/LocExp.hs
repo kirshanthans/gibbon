@@ -2,8 +2,8 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE PatternSynonyms #-}
+
+
 -- {-# OPTIONS_GHC -Wall #-}
 
 
@@ -152,39 +152,39 @@ data LocState = InLS Loc
 
 --- TODO: finish typechecker
 --- does it need to be monadic, or can it be pure?
-typeofE :: DDefs Ptype -> (Map Var Ftype) -> (Set Constr) -> (Set Reg) -> (Set LocState) -> Exp ->
+typeofE :: DDefs Ptype -> Map Var Ftype -> Set Constr -> Set Reg -> Set LocState -> Exp ->
            (Ftype,Set LocState)
 typeofE dd g c r ls exp =
     case exp of
       VarE v -> case M.lookup v g of
                   Just t -> (t, ls)
-                  Nothing -> error ("Failed to lookup variable " ++ (show v)
-                                   ++ " in gamma: " ++ (show g))
+                  Nothing -> error ("Failed to lookup variable " ++ show v
+                                   ++ " in gamma: " ++ show g)
 
       LitE _ -> (PrimType IntType, ls)
 
       LitSymE _ -> (PrimType SymType, ls)
 
       LetPackedE v pt e1 e2 -> let (t1, ls1) = typeofE dd g c r ls e1
-                               in if (t1 == (PrimType pt)) then typeofE dd (M.insert v (PrimType pt) g) c r ls1 e2
-                                  else error ("Type of let bound expression was " ++ (show t1)
-                                             ++ " but expected " ++ (show pt) ++ " for exp: "
-                                             ++ (show e1))
+                               in if t1 == PrimType pt then typeofE dd (M.insert v (PrimType pt) g) c r ls1 e2
+                                  else error ("Type of let bound expression was " ++ show t1
+                                             ++ " but expected " ++ show pt ++ " for exp: "
+                                             ++ show e1)
 
       LetRegionE r' exp -> typeofE dd g c (S.insert r' r) ls exp
 
       LetE v pt e1 e2 ->
-          if hasPacked pt then error ("Expected unpacked type, found " ++ (show pt))
+          if hasPacked pt then error ("Expected unpacked type, found " ++ show pt)
           else let (t1, ls1) = typeofE dd g c r ls e1
-               in if (t1 == (PrimType pt)) then typeofE dd (M.insert v (PrimType pt) g) c r ls1 e2
-                  else error ("Type of let bound expression was " ++ (show t1)
-                             ++ " but expected " ++ (show pt) ++ " for exp: "
-                             ++ (show e1))
+               in if t1 == PrimType pt then typeofE dd (M.insert v (PrimType pt) g) c r ls1 e2
+                  else error ("Type of let bound expression was " ++ show t1
+                             ++ " but expected " ++ show pt ++ " for exp: "
+                             ++ show e1)
 
       AppE v rps exps -> case M.lookup v g of
                            Just t -> undefined
-                           Nothing -> error ("Failed to lookup variable " ++ (show v)
-                                            ++ " in gamma: " ++ (show g))
+                           Nothing -> error ("Failed to lookup variable " ++ show v
+                                            ++ " in gamma: " ++ show g)
       LetLocE v le exp -> case le of
                             StartL r' -> let c' = S.union c $ S.fromList [StartOfC v r', InC v r']
                                          in typeofE dd g c' r ls exp
@@ -205,7 +205,7 @@ typeofE dd g c r ls exp =
           where f ls (e:es) = let (PrimType t,ls') = typeofE dd g c r ls e
                                   (PrimType (ProdType ts),ls'') = f ls' es
                               in (PrimType $ ProdType $ S.toList $ S.union (S.singleton t) (S.fromList ts), ls'')
-                f ls [] = (PrimType $ voidType, ls)
+                f ls [] = (PrimType voidType, ls)
 
       ProjE i exp -> let (PrimType (ProdType ts),ls') = typeofE dd g c r ls exp
                      in (PrimType $ ts !! i, ls')
@@ -213,7 +213,7 @@ typeofE dd g c r ls exp =
       IfE e1 e2 e3 -> let (t1,ls') = typeofE dd g c r ls e1
                           (t2,ls'') = typeofE dd g c r ls' e2
                           (t3,ls''') = typeofE dd g c r ls'' e3
-                      in if t1 == PrimType (BoolType) && t2 == t3 then (t3,ls''') else undefined
+                      in if t1 == PrimType BoolType && t2 == t3 then (t3,ls''') else undefined
 
       DataConE v l exps -> undefined
 
@@ -221,15 +221,15 @@ typeofE dd g c r ls exp =
 
       CaseE exp mp -> undefined
 
-findRegion :: (Set Reg) -> (Set Constr) -> Loc -> Reg
+findRegion :: Set Reg -> Set Constr -> Loc -> Reg
 findRegion r c l = case S.foldr f Nothing c of
                      Nothing -> undefined
                      Just reg -> if S.member reg r then reg
-                                 else error ("Region " ++ (show reg) ++ " not in environment.")
+                                 else error ("Region " ++ show reg ++ " not in environment.")
     where f (InC loc reg) a = if l == loc then Just reg else a
           f _c a = a
 
-noAfter :: Loc -> (Set LocState) -> a -> a
+noAfter :: Loc -> Set LocState -> a -> a
 noAfter = undefined
 
 -- Pure interpreter
@@ -240,12 +240,12 @@ interpProg' :: LocProgram -> SyM Exp
 interpProg' (LocProgram _ _ Nothing) = error "Can't interpret program with no main expression"
 interpProg' (LocProgram _dd fenv (Just e)) = interpE fenv M.empty e
 
-interpE :: (Map Var Fdef) -> (Map Var Exp) -> Exp -> SyM Exp
+interpE :: Map Var Fdef -> Map Var Exp -> Exp -> SyM Exp
 interpE fenv env exp =
     case exp of
       VarE v -> case M.lookup v env of
                   Just e -> return e
-                  Nothing -> error ("Variable " ++ (show v) ++ " not found in env: " ++ (show env))
+                  Nothing -> error ("Variable " ++ show v ++ " not found in env: " ++ show env)
 
       LitE i -> return $ LitE i
 
@@ -256,7 +256,7 @@ interpE fenv env exp =
                              do exps' <- mapM (interpE fenv env) exps
                                 let env' = M.union (M.fromList (zip vs exps')) env
                                 interpE fenv env' e
-                         Nothing -> error ("Function with name " ++ (show v) ++ " not found in fenv: " ++ (show fenv))
+                         Nothing -> error ("Function with name " ++ show v ++ " not found in fenv: " ++ show fenv)
 
       LetPackedE v _ e1 e2 -> do e1' <- interpE fenv env e1
                                  let env' = M.insert v e1' env
@@ -295,7 +295,7 @@ interpE fenv env exp =
                                                             env' = M.union (M.fromList (zip vs exps)) env
                                                         in interpE fenv env' e
                                        Nothing -> undefined
-               _ -> error ("Expected case of packed data, got " ++ (show exp'))
+               _ -> error ("Expected case of packed data, got " ++ show exp')
 
       PrimAppE p exps ->
           case p of
@@ -314,11 +314,11 @@ interpE fenv env exp =
             EqIntP -> do let [e1,e2] = exps
                          (LitE i1) <- interpE fenv env e1
                          (LitE i2) <- interpE fenv env e2
-                         return $ if (i1 == i2) then PrimAppE MkTrue [] else PrimAppE MkFalse []
+                         return $ if i1 == i2 then PrimAppE MkTrue [] else PrimAppE MkFalse []
             EqSymP -> do let [e1,e2] = exps
                          (LitSymE i1) <- interpE fenv env e1
                          (LitSymE i2) <- interpE fenv env e2
-                         return $ if (i1 == i2) then PrimAppE MkTrue [] else PrimAppE MkFalse []
+                         return $ if i1 == i2 then PrimAppE MkTrue [] else PrimAppE MkFalse []
             MkTrue -> return $ PrimAppE MkTrue []
             MkFalse -> return $ PrimAppE MkFalse []
 
@@ -344,75 +344,75 @@ add1Prog = LocProgram (fromListDD [DDef "Tree" True
 add1Fun :: Fdef
 add1Fun = Fdef "add1"
           add1Type
-          [(LocIn "l1" "r1"),
-           (LocOut "l2" "r2")]
+          [LocIn "l1" "r1",
+           LocOut "l2" "r2"]
           ["tr"]
           add1Body
 
 sumFun :: Fdef
 sumFun = Fdef "sum"
          sumType
-         [(LocIn "l1" "r1")]
-         [("tr")]
+         [LocIn "l1" "r1"]
+         ["tr"]
          sumBody
 
 add1Type :: Ftype
 add1Type = FunType
-           [(LocIn "l1" "r1"),
-            (LocOut "l2" "r2")]
+           [LocIn "l1" "r1",
+            LocOut "l2" "r2"]
            (PackedType "Tree" "l1") (PackedType "Tree" "l2")
 
 sumType :: Ftype
 sumType = FunType
-          [(LocIn "l1" "r1")]
+          [LocIn "l1" "r1"]
           (PackedType "Tree" "l1") IntType
 
 add1Body :: Exp
 add1Body = CaseE (VarE "tr") $
            M.fromList [("Leaf", ([("n","ln",IntType)],
-                                 DataConE "Leaf" "l2" [PrimAppE AddP [(VarE "n"),(LitE 1)]])),
+                                 DataConE "Leaf" "l2" [PrimAppE AddP [VarE "n",LitE 1]])),
                        ("Node", ([("x","lx",PackedType "Tree" "lx"),("y","ly",PackedType "Tree" "ly")],
                                  nodeCase))]
 
 nodeCase :: Exp
 nodeCase = LetLocE "l3" (PlusCL 1 "l2") $
            LetPackedE "x2" (PackedType "Tree" "l3")
-                      (AppE "add1" [LocIn "lx" "r1",LocOut "l3" "r2"] [(VarE "x")]) $
+                      (AppE "add1" [LocIn "lx" "r1",LocOut "l3" "r2"] [VarE "x"]) $
            LetLocE "l4" (PlusSizeOfL "x2" "l3") $
            LetPackedE "y2" (PackedType "Tree" "l4")
-                      (AppE "add1" [LocIn "ly" "r1",LocOut "l4" "r2"] [(VarE "y")]) $
+                      (AppE "add1" [LocIn "ly" "r1",LocOut "l4" "r2"] [VarE "y"]) $
            DataConE "Node" "l2" [VarE "x2", VarE "y2"]
 
 sumBody :: Exp
 sumBody = CaseE (VarE "tr") $
            M.fromList [("Leaf", ([("n","ln",IntType)],
-                                 (VarE "n"))),
+                                 VarE "n")),
                        ("Node", ([("x","lx",PackedType "Tree" "lx"),("y","ly",PackedType "Tree" "ly")],
-                                 LetE "n1" IntType (AppE "sum" [LocIn "lx" "r1"] [(VarE "x")]) $
-                                 LetE "n2" IntType (AppE "sum" [LocIn "ly" "r1"] [(VarE "y")]) $
-                                 PrimAppE AddP [(VarE "n1"),(VarE "n2")]))]
+                                 LetE "n1" IntType (AppE "sum" [LocIn "lx" "r1"] [VarE "x"]) $
+                                 LetE "n2" IntType (AppE "sum" [LocIn "ly" "r1"] [VarE "y"]) $
+                                 PrimAppE AddP [VarE "n1",VarE "n2"]))]
 
 add1Test :: Exp
 add1Test = withTree $
            LetLocE "o" (StartL "r2") $
            LetPackedE "tradd" (PackedType "Tree" "o")
-                      (AppE "add1" [LocIn "l" "r1", LocOut "o" "r2"] [(VarE "tr")]) $
-           AppE "sum" [LocIn "o" "r2"] [(VarE "tradd")]
+                      (AppE "add1" [LocIn "l" "r1", LocOut "o" "r2"] [VarE "tr"]) $
+           AppE "sum" [LocIn "o" "r2"] [VarE "tradd"]
 
 withTree :: Exp -> Exp
 withTree e = LetRegionE "r1" $
              LetRegionE "r2" $
              LetLocE "l" (StartL "r1") $
              LetLocE "l1" (PlusCL 1 "l") $
-             LetPackedE "tr1" (PackedType "Tree" "l1") (DataConE "Leaf" "l1" [(LitE 1)]) $
+             LetPackedE "tr1" (PackedType "Tree" "l1") (DataConE "Leaf" "l1" [LitE 1]) $
              LetLocE "l2" (PlusSizeOfL "tr1" "l1") $
-             LetPackedE "tr2" (PackedType "Tree" "l2") (DataConE "Leaf" "l2" [(LitE 2)]) $
-             LetPackedE "tr" (PackedType "Tree" "l") (DataConE "Node" "l" [(VarE "tr1"),(VarE "tr2")]) $
+             LetPackedE "tr2" (PackedType "Tree" "l2") (DataConE "Leaf" "l2" [LitE 2]) $
+             LetPackedE "tr" (PackedType "Tree" "l") (DataConE "Node" "l" [VarE "tr1",VarE "tr2"])
              e
 
 caseOnTree :: Var -> Exp
 caseOnTree v = CaseE (VarE v) $
                M.fromList [("Leaf", ([("n","ln",IntType)],
-                                     (LitE 1))),
+                                     LitE 1)),
                            ("Node", ([("x","lx",PackedType "Tree" "lx"),("y","ly",PackedType "Tree" "ly")],
-                                     (LitE 2)))]
+                                     LitE 2))]
