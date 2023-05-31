@@ -4,6 +4,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Gibbon.L4.Interp
     ( Val(..), applyPrim
@@ -14,7 +15,6 @@ module Gibbon.L4.Interp
 
 import Control.Monad
 import qualified Data.Map.Strict as M
-import Data.Maybe (listToMaybe)
 
 import Data.Sequence (Seq, ViewL ((:<)), (|>))
 import qualified Data.Sequence as Seq
@@ -27,6 +27,8 @@ import Text.PrettyPrint
 
 -- import Data.Time.Clock
 import System.Clock
+import Control.Arrow ((&&&))
+import Data.List (find)
 --------------------------------------------------------------------------------
 
 data Val
@@ -61,7 +63,7 @@ execProg :: Prog -> IO [Val]
 execProg (Prog _ _ Nothing) = error "Can't evaluate program: No expression given"
 execProg (Prog _ funs (Just (PrintExp expr))) = exec env expr
   where
-    env = M.fromList (map (\f -> (funName f, FunVal f)) funs)
+    env = M.fromList (map (funName &&& FunVal) funs)
 
 type Env = M.Map Var Val
 
@@ -73,7 +75,7 @@ clk = Monotonic
 
 
 eval :: Env -> Triv -> Val
-eval env (VarTriv v) = M.findWithDefault (error ("Unbound var: " ++ (fromVar v))) v env
+eval env (VarTriv v) = M.findWithDefault (error ("Unbound var: " ++ fromVar v)) v env
 eval _   (IntTriv i) = IntVal (fromIntegral i) -- TODO: Change L1 to Int64 too.
 eval _   (CharTriv i) = CharVal i
 eval _   (FloatTriv i) = FloatVal i -- TODO: Change L1 to Int64 too.
@@ -120,7 +122,7 @@ exec _ (ErrT s) =
     error $ "ErrT: " ++ s
 
 exec env (LetTimedT flg bnds rhs bod) = do
-    let iters = if flg then (error "Implement timed iteration inside the interpreter...")
+    let iters = if flg then error "Implement timed iteration inside the interpreter..."
                 else 1
     !_ <- return $! force env
     st <- getTime clk
@@ -157,8 +159,8 @@ exec env (Switch _ tr alts def) =
       | otherwise
       = error "tagAlts: Found IntAlts"
 
-    chooseIntAlt i = snd <$> listToMaybe (filter ((i ==) . fst) intAlts)
-    chooseTagAlt t = snd <$> listToMaybe (filter ((t ==) . fst) tagAlts)
+    chooseIntAlt i = snd <$> find ((i ==) . fst) intAlts
+    chooseTagAlt t = snd <$> find ((t ==) . fst) tagAlts
 
     final_alt =
       maybe def return $
@@ -177,7 +179,7 @@ exec _ e = error$ "Interpreter/exec, unhandled expression:\n  "++show (doc e)
 
 {-# NOINLINE execWrapper #-}
 execWrapper :: Int -> Env -> Tail -> IO [Val]
-execWrapper _i env ex = fmap force $ exec env ex
+execWrapper _i env ex = force <$> exec env ex
 
 extendEnv :: Env -> [(Var, Val)] -> Env
 extendEnv = foldr (uncurry M.insert)
@@ -225,8 +227,8 @@ applyPrim ScopedParBuffer{} [] = error "TargetInterp/applyPrim: finish ScopedBuf
 applyPrim GetFirstWord [] = error "TargetInterp/applyPrim: finish GetFirstWord"
 
 applyPrim (DictInsertP _) [] = error "TargetInterp/applyPrim: finish DictInsertP"
-applyPrim (DictLookupP _) [] = error $ "TargetInterp/applyPrim: finish DictLookupP"
-applyPrim (DictEmptyP _) []  = error $ "TargetInterp/applyPrim: finish DictEmptyP"
+applyPrim (DictLookupP _) [] = error "TargetInterp/applyPrim: finish DictLookupP"
+applyPrim (DictEmptyP _) []  = error "TargetInterp/applyPrim: finish DictEmptyP"
 
 
 applyPrim op args = error ("applyPrim: Unsupported form or bad arguments: " ++ show op ++ " " ++ show args)

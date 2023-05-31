@@ -146,7 +146,7 @@ tcExp isPacked ddfs env exp =
           return (ProdTy [])
 
         BumpArenaRefCount{} ->
-          throwError $ GenericTC ("BumpArenaRefCount not handled.") exp
+          throwError $ GenericTC "BumpArenaRefCount not handled." exp
 
         RetE ls -> do
           tys <- mapM go ls
@@ -168,7 +168,7 @@ tcExp isPacked ddfs env exp =
 
     AppE v locs ls -> do
       let funty =
-            case (M.lookup v (fEnv env)) of
+            case M.lookup v (fEnv env) of
               Just ty -> ty
               Nothing -> error $ "Function not found: " ++ sdoc v ++ " while checking " ++
                                  sdoc exp
@@ -183,7 +183,7 @@ tcExp isPacked ddfs env exp =
                            exp
 
       -- Check arity
-      if (length ls) /= (length funInTys)
+      if length ls /= length funInTys
       then throwError $ GenericTC ("Arity mismatch. Expected:" ++ show (length funInTys) ++
                                    " Got:" ++ show (length ls)) exp
       else pure ()
@@ -198,12 +198,12 @@ tcExp isPacked ddfs env exp =
           subDictTy m (SymDictTy (Just w) ty) =
               case M.lookup w m of
                 Just w' -> SymDictTy (Just w') ty
-                Nothing -> error $ ("Cannot match up arena for dictionary in function application: " ++ sdoc exp)
+                Nothing -> error ("Cannot match up arena for dictionary in function application: " ++ sdoc exp)
           subDictTy _ ty = ty
 
           subFunInTys = L.map (subDictTy arMap) funInTys
           subFunOutTy = subDictTy arMap funRetTy
-      _ <- mapM (\(a,b) -> ensureEqualTyModCursor exp a b) (zip subFunInTys argTys)
+      mapM_ (uncurry (ensureEqualTyModCursor exp)) (zip subFunInTys argTys)
       return subFunOutTy
 
     PrimAppE pr es -> do
@@ -225,37 +225,37 @@ tcExp isPacked ddfs env exp =
 
           bool_ops = do
             len2
-            _ <- ensureEqualTyModCursor (es !! 0) BoolTy (tys !! 0)
+            _ <- ensureEqualTyModCursor (head es) BoolTy (head tys)
             _ <- ensureEqualTyModCursor (es !! 1) BoolTy (tys !! 1)
             pure BoolTy
 
           int_ops = do
             len2
-            _ <- ensureEqualTyModCursor (es !! 0) IntTy (tys !! 0)
+            _ <- ensureEqualTyModCursor (head es) IntTy (head tys)
             _ <- ensureEqualTyModCursor (es !! 1) IntTy (tys !! 1)
             pure IntTy
 
           float_ops = do
             len2
-            _ <- ensureEqualTy (es !! 0) FloatTy (tys !! 0)
+            _ <- ensureEqualTy (head es) FloatTy (head tys)
             _ <- ensureEqualTy (es !! 1) FloatTy (tys !! 1)
             pure FloatTy
 
           int_cmps = do
             len2
-            _ <- ensureEqualTyModCursor (es !! 0) IntTy (tys !! 0)
+            _ <- ensureEqualTyModCursor (head es) IntTy (head tys)
             _ <- ensureEqualTyModCursor (es !! 1) IntTy (tys !! 1)
             pure BoolTy
 
           float_cmps = do
             len2
-            _ <- ensureEqualTy (es !! 0) FloatTy (tys !! 0)
+            _ <- ensureEqualTy (head es) FloatTy (head tys)
             _ <- ensureEqualTy (es !! 1) FloatTy (tys !! 1)
             pure BoolTy
-            
+
           char_cmps = do
             len2
-            _ <- ensureEqualTy (es !! 0) CharTy (tys !! 0)
+            _ <- ensureEqualTy (head es) CharTy (head tys)
             _ <- ensureEqualTy (es !! 1) CharTy (tys !! 1)
             pure BoolTy
 
@@ -287,11 +287,11 @@ tcExp isPacked ddfs env exp =
         OrP     -> bool_ops
         AndP    -> bool_ops
 
-        Gensym -> len0 >>= \_ -> pure SymTy
+        Gensym -> len0 >> pure SymTy
 
         EqSymP -> do
           len2
-          _ <- ensureEqualTyModCursor (es !! 0) SymTy (tys !! 0)
+          _ <- ensureEqualTyModCursor (head es) SymTy (head tys)
           _ <- ensureEqualTyModCursor (es !! 1) SymTy (tys !! 1)
           return BoolTy
 
@@ -303,22 +303,22 @@ tcExp isPacked ddfs env exp =
         FRandP-> return FloatTy
         FSqrtP -> do
           len1
-          ensureEqualTy exp FloatTy (tys !! 0)
+          ensureEqualTy exp FloatTy (head tys)
           return FloatTy
 
         FTanP -> do
           len1
-          ensureEqualTy exp FloatTy (tys !! 0)
+          ensureEqualTy exp FloatTy (head tys)
           return FloatTy
 
         FloatToIntP -> do
           len1
-          _ <- ensureEqualTy exp FloatTy (tys !! 0)
+          _ <- ensureEqualTy exp FloatTy (head tys)
           return IntTy
 
         IntToFloatP -> do
           len1
-          _ <- ensureEqualTy exp IntTy (tys !! 0)
+          _ <- ensureEqualTy exp IntTy (head tys)
           return FloatTy
 
         SizeParam -> do
@@ -334,27 +334,27 @@ tcExp isPacked ddfs env exp =
 
         PrintInt -> do
           len1
-          _ <- ensureEqualTy (es !! 0) IntTy (tys !! 0)
+          _ <- ensureEqualTy (head es) IntTy (head tys)
           return (ProdTy [])
 
         PrintChar -> do
           len1
-          _ <- ensureEqualTy (es !! 0) CharTy (tys !! 0)
+          _ <- ensureEqualTy (head es) CharTy (head tys)
           return (ProdTy [])
 
         PrintFloat -> do
           len1
-          _ <- ensureEqualTy (es !! 0) FloatTy (tys !! 0)
+          _ <- ensureEqualTy (head es) FloatTy (head tys)
           return (ProdTy [])
 
         PrintBool -> do
           len1
-          _ <- ensureEqualTy (es !! 0) BoolTy (tys !! 0)
+          _ <- ensureEqualTy (head es) BoolTy (head tys)
           return (ProdTy [])
 
         PrintSym -> do
           len1
-          _ <- ensureEqualTy (es !! 0) SymTy (tys !! 0)
+          _ <- ensureEqualTy (head es) SymTy (head tys)
           return (ProdTy [])
 
         ReadInt -> do
@@ -367,13 +367,13 @@ tcExp isPacked ddfs env exp =
 
         SymSetInsert -> do
           len2
-          _ <- ensureEqualTy (es !! 0) SymSetTy (tys !! 0)
+          _ <- ensureEqualTy (head es) SymSetTy (head tys)
           _ <- ensureEqualTy (es !! 1) SymTy (tys !! 1)
           return SymSetTy
 
         SymSetContains -> do
           len2
-          _ <- ensureEqualTy (es !! 0) SymSetTy (tys !! 0)
+          _ <- ensureEqualTy (head es) SymSetTy (head tys)
           _ <- ensureEqualTy (es !! 1) SymTy (tys !! 1)
           return BoolTy
 
@@ -383,20 +383,20 @@ tcExp isPacked ddfs env exp =
 
         SymHashInsert -> do
           len3
-          _ <- ensureEqualTy (es !! 0) SymHashTy (tys !! 0)
+          _ <- ensureEqualTy (head es) SymHashTy (head tys)
           _ <- ensureEqualTy (es !! 1) SymTy (tys !! 1)
           _ <- ensureEqualTy (es !! 2) SymTy (tys !! 2)
           return SymHashTy
 
         SymHashLookup -> do
           len2
-          _ <- ensureEqualTy (es !! 0) SymHashTy (tys !! 0)
+          _ <- ensureEqualTy (head es) SymHashTy (head tys)
           _ <- ensureEqualTy (es !! 1) SymTy (tys !! 1)
           return SymTy
 
         SymHashContains -> do
           len2
-          _ <- ensureEqualTy (es !! 0) SymHashTy (tys !! 0)
+          _ <- ensureEqualTy (head es) SymHashTy (head tys)
           _ <- ensureEqualTy (es !! 1) SymTy (tys !! 1)
           return BoolTy
 
@@ -404,13 +404,13 @@ tcExp isPacked ddfs env exp =
           len1
           let [a] = tys
           _ <- ensureEqualTyModCursor exp ArenaTy a
-          let (VarE var) = es !! 0
+          let (VarE var) = head es
           return $ SymDictTy (Just var) CursorTy
 
         DictInsertP _ty -> do
           len4
           let [a,_d,k,v] = tys
-          let (VarE var) = es !! 0
+          let (VarE var) = head es
           _ <- ensureEqualTyModCursor exp ArenaTy a
           _ <- ensureEqualTyModCursor exp SymTy k
           _ <- ensureEqualTyModCursor exp CursorTy v
@@ -460,35 +460,35 @@ tcExp isPacked ddfs env exp =
           len1
           checkListElemTy elty
           let [i] = tys
-          _ <- ensureEqualTy (es !! 0) IntTy i
+          _ <- ensureEqualTy (head es) IntTy i
           pure (VectorTy elty)
 
         VFreeP elty -> do
           len1
           checkListElemTy elty
           let [i] = tys
-          _ <- ensureEqualTy (es !! 0) (VectorTy elty) i
+          _ <- ensureEqualTy (head es) (VectorTy elty) i
           pure (ProdTy [])
 
         VFree2P elty -> do
           len1
           checkListElemTy elty
           let [i] = tys
-          _ <- ensureEqualTy (es !! 0) (VectorTy elty) i
+          _ <- ensureEqualTy (head es) (VectorTy elty) i
           pure (ProdTy [])
 
         VLengthP elty -> do
           len1
           checkListElemTy elty
           let [ls] = tys
-          _ <- ensureEqualTy (es !! 0) (VectorTy elty) ls
+          _ <- ensureEqualTy (head es) (VectorTy elty) ls
           pure IntTy
 
         VNthP elty -> do
           len2
           checkListElemTy elty
           let [ls, i] = tys
-          _ <- ensureEqualTy (es !! 0) (VectorTy elty) ls
+          _ <- ensureEqualTy (head es) (VectorTy elty) ls
           _ <- ensureEqualTy (es !! 1) IntTy i
           pure elty
 
@@ -496,7 +496,7 @@ tcExp isPacked ddfs env exp =
           len3
           checkListElemTy elty
           let [from,to,ls] = tys
-          _ <- ensureEqualTy (es !! 0) IntTy from
+          _ <- ensureEqualTy (head es) IntTy from
           _ <- ensureEqualTy (es !! 1) IntTy to
           _ <- ensureEqualTy (es !! 2) (VectorTy elty) ls
           pure (VectorTy elty)
@@ -505,7 +505,7 @@ tcExp isPacked ddfs env exp =
           len3
           checkListElemTy elty
           let [ls,i,x] = tys
-          _ <- ensureEqualTy (es !! 0) (VectorTy elty) ls
+          _ <- ensureEqualTy (head es) (VectorTy elty) ls
           _ <- ensureEqualTy (es !! 1) IntTy i
           _ <- ensureEqualTy (es !! 2) elty x
           pure (VectorTy elty)
@@ -514,20 +514,20 @@ tcExp isPacked ddfs env exp =
           len1
           checkListElemTy elty
           let [ls] = tys
-          _ <- ensureEqualTy (es !! 0) (VectorTy (VectorTy elty)) ls
+          _ <- ensureEqualTy (head es) (VectorTy (VectorTy elty)) ls
           pure (VectorTy elty)
 
         -- Given that the first argument is a list of type (VectorTy t),
         -- ensure that the 2nd argument is function reference of type:
         -- ty -> ty -> IntTy
         VSortP elty ->
-          case (es !! 1) of
+          case es !! 1 of
             VarE f -> do
               len2
               let [ls] = tys
                   fn_ty@(in_tys, ret_ty) = lookupFEnv f env
                   err x = throwError $ GenericTC ("vsort: Expected a sort function of type (ty -> ty -> Bool). Got"++ sdoc x) exp
-              _ <- ensureEqualTy (es !! 0) (VectorTy elty) ls
+              _ <- ensureEqualTy (head es) (VectorTy elty) ls
               case in_tys of
                 [a,b] -> do
                    _ <- ensureEqualTy (es !! 1) a elty
@@ -543,7 +543,7 @@ tcExp isPacked ddfs env exp =
           len2
           checkListElemTy elty
           let [ls1,ls2] = tys
-          _ <- ensureEqualTy (es !! 0) (VectorTy elty) ls1
+          _ <- ensureEqualTy (head es) (VectorTy elty) ls1
           _ <- ensureEqualTy (es !! 1) (VectorTy elty) ls2
           pure (VectorTy elty)
 
@@ -552,7 +552,7 @@ tcExp isPacked ddfs env exp =
           checkListElemTy kty
           checkListElemTy vty
           let [key, val, dict] = tys
-          _ <- ensureEqualTy (es !! 0) key kty
+          _ <- ensureEqualTy (head es) key kty
           _ <- ensureEqualTy (es !! 1) val vty
           _ <- ensureEqualTy (es !! 2) dict (PDictTy kty vty)
           pure (PDictTy kty vty)
@@ -562,9 +562,9 @@ tcExp isPacked ddfs env exp =
           checkListElemTy kty
           checkListElemTy vty
           let [key, dict] = tys
-          _ <- ensureEqualTy (es !! 0) key kty
-          _ <- ensureEqualTy (es !! 0) dict (PDictTy kty vty)
-          pure (vty)
+          _ <- ensureEqualTy (head es) key kty
+          _ <- ensureEqualTy (head es) dict (PDictTy kty vty)
+          pure vty
 
         PDictAllocP kty vty -> do
           len0
@@ -577,16 +577,16 @@ tcExp isPacked ddfs env exp =
           checkListElemTy kty
           checkListElemTy vty
           let [key, dict] = tys
-          _ <- ensureEqualTy (es !! 0) key kty
-          _ <- ensureEqualTy (es !! 0) dict (PDictTy kty vty)
-          pure (BoolTy)
+          _ <- ensureEqualTy (head es) key kty
+          _ <- ensureEqualTy (head es) dict (PDictTy kty vty)
+          pure BoolTy
 
         PDictForkP kty vty -> do
           len1
           checkListElemTy kty
           checkListElemTy vty
           let [dict] = tys
-          _ <- ensureEqualTy (es !! 0) dict (PDictTy kty vty)
+          _ <- ensureEqualTy (head es) dict (PDictTy kty vty)
           pure (ProdTy [PDictTy kty vty, PDictTy kty vty])
 
         PDictJoinP kty vty -> do
@@ -594,8 +594,8 @@ tcExp isPacked ddfs env exp =
           checkListElemTy kty
           checkListElemTy vty
           let [dict1, dict2] = tys
-          _ <- ensureEqualTy (es !! 0) dict1 (PDictTy kty vty)
-          _ <- ensureEqualTy (es !! 0) dict2 (PDictTy kty vty)
+          _ <- ensureEqualTy (head es) dict1 (PDictTy kty vty)
+          _ <- ensureEqualTy (head es) dict2 (PDictTy kty vty)
           pure (PDictTy kty vty)
 
         LLAllocP elty -> do
@@ -607,14 +607,14 @@ tcExp isPacked ddfs env exp =
           len1
           checkListElemTy elty
           let [ll] = tys
-          _ <- ensureEqualTy (es !! 0) ll (ListTy elty)
-          pure (BoolTy)
+          _ <- ensureEqualTy (head es) ll (ListTy elty)
+          pure BoolTy
 
         LLConsP elty -> do
           len2
           checkListElemTy elty
           let [elt, ll] = tys
-          _ <- ensureEqualTy (es !! 0) elt elty
+          _ <- ensureEqualTy (head es) elt elty
           _ <- ensureEqualTy (es !! 1) ll (ListTy elty)
           pure (ListTy elty)
 
@@ -622,35 +622,35 @@ tcExp isPacked ddfs env exp =
           len1
           checkListElemTy elty
           let [ll] = tys
-          _ <- ensureEqualTy (es !! 0) ll (ListTy elty)
-          pure (elty)
+          _ <- ensureEqualTy (head es) ll (ListTy elty)
+          pure elty
 
         LLTailP elty -> do
           len1
           checkListElemTy elty
           let [ll] = tys
-          _ <- ensureEqualTy (es !! 0) ll (ListTy elty)
+          _ <- ensureEqualTy (head es) ll (ListTy elty)
           pure (ListTy elty)
 
         LLFreeP elty -> do
           len1
           checkListElemTy elty
           let [i] = tys
-          _ <- ensureEqualTy (es !! 0) (ListTy elty) i
+          _ <- ensureEqualTy (head es) (ListTy elty) i
           pure (ProdTy [])
 
         LLFree2P elty -> do
           len1
           checkListElemTy elty
           let [i] = tys
-          _ <- ensureEqualTy (es !! 0) (ListTy elty) i
+          _ <- ensureEqualTy (head es) (ListTy elty) i
           pure (ProdTy [])
 
         LLCopyP elty -> do
           len1
           checkListElemTy elty
           let [i] = tys
-          _ <- ensureEqualTy (es !! 0) (ListTy elty) i
+          _ <- ensureEqualTy (head es) (ListTy elty) i
           pure (ListTy elty)
 
         GetNumProcessors -> do
@@ -663,14 +663,14 @@ tcExp isPacked ddfs env exp =
 
         IntHashInsert -> do
           len3
-          _ <- ensureEqualTy (es !! 0) IntHashTy (tys !! 0)
+          _ <- ensureEqualTy (head es) IntHashTy (head tys)
           _ <- ensureEqualTy (es !! 1) SymTy (tys !! 1)
           _ <- ensureEqualTy (es !! 2) IntTy (tys !! 2)
           return IntHashTy
 
         IntHashLookup -> do
           len2
-          _ <- ensureEqualTy (es !! 0) IntHashTy (tys !! 0)
+          _ <- ensureEqualTy (head es) IntHashTy (head tys)
           _ <- ensureEqualTy (es !! 1) SymTy (tys !! 1)
           return IntTy
 
@@ -725,8 +725,7 @@ tcExp isPacked ddfs env exp =
 
     ProjE i e -> do
       ty  <- go e
-      tyi <- tcProj exp i ty
-      return tyi
+      tcProj exp i ty
 
     CaseE e cs -> do
       tye  <- go e
@@ -752,11 +751,7 @@ tcExp isPacked ddfs env exp =
                   | (ty1,ty2,e) <- zip3 args tys es]
         return $ PackedTy dcTy loc
 
-    TimeIt e _ty _b -> do
-      -- Before flatten, _ty is always (PackedTy "DUMMY_TY" ())
-      -- enforce ty == _ty in strict mode ?
-      ty <- go e
-      return ty
+    TimeIt e _ty _b -> go e
 
     SpawnE fn locs args -> go (AppE fn locs args)
     SyncE -> pure voidTy
@@ -811,7 +806,7 @@ tcProg isPacked prg@Prog{ddefs,fundefs,mainExp} = do
       case ty1 of
         PackedTy{}  -> ty2 == ProdTy [CursorTy,CursorTy] || ty1 == ty2
         ProdTy tys2 -> let ProdTy tys1 = ty1
-                       in  all (\(a,b) -> tyEq a b) (zip tys1 tys2)
+                       in  all (uncurry tyEq) (zip tys1 tys2)
         _ -> ty1 == ty2
 
     -- fd :: forall e l . FunDef Ty1 Exp -> PassM ()
@@ -824,13 +819,13 @@ tcProg isPacked prg@Prog{ddefs,fundefs,mainExp} = do
         Left err -> error $ sdoc err
         Right ty -> if ty `compareModCursor` outty
                     then return ()
-                    else error $ "Expected type " ++ (sdoc outty)
-                         ++ " and got type " ++ (sdoc ty) ++ "\n" ++ (sdoc funBody)
+                    else error $ "Expected type " ++ sdoc outty
+                         ++ " and got type " ++ sdoc ty ++ "\n" ++ sdoc funBody
 
       return ()
 
 
-tcCases :: Bool -> DDefs3 -> Env2 Ty3 -> [(DataCon, [(Var, ())], Exp3)] -> TcM Ty3 (Exp3)
+tcCases :: Bool -> DDefs3 -> Env2 Ty3 -> [(DataCon, [(Var, ())], Exp3)] -> TcM Ty3 Exp3
 tcCases isPacked ddfs env cs = do
   tys <- forM cs $ \(c,args',rhs) -> do
            let args  = L.map fst args'
@@ -847,7 +842,7 @@ tcCases isPacked ddfs env cs = do
 
 -- | Ensure that two things are equal.
 -- Includes an expression for error reporting.
-ensureEqual :: Exp3 -> String -> Ty3 -> Ty3 -> TcM Ty3 (Exp3)
+ensureEqual :: Exp3 -> String -> Ty3 -> Ty3 -> TcM Ty3 Exp3
 ensureEqual exp str (SymDictTy ar1 _) (SymDictTy ar2 _) =
     if ar1 == ar2
     then return $ SymDictTy ar1 CursorTy
@@ -859,17 +854,17 @@ ensureEqual exp str a b = if a == b
 
 -- | Ensure that two types are equal.
 -- Includes an expression for error reporting.
-ensureEqualTy :: Exp3 -> Ty3 -> Ty3 -> TcM Ty3 (Exp3)
+ensureEqualTy :: Exp3 -> Ty3 -> Ty3 -> TcM Ty3 Exp3
 ensureEqualTy exp a b = ensureEqual exp ("Expected these types to be the same: "
-                                         ++ (sdoc a) ++ " <> " ++ (sdoc b)) a b
+                                         ++ sdoc a ++ " <> " ++ sdoc b) a b
 
-ensureEqualTyModCursor :: Exp3 -> Ty3 -> Ty3 -> TcM Ty3 (Exp3)
+ensureEqualTyModCursor :: Exp3 -> Ty3 -> Ty3 -> TcM Ty3 Exp3
 ensureEqualTyModCursor _exp CursorTy (PackedTy _ _) = return CursorTy
 ensureEqualTyModCursor _exp (PackedTy _ _) CursorTy = return CursorTy
 ensureEqualTyModCursor _exp IntTy CursorTy = return CursorTy
 ensureEqualTyModCursor _exp CursorTy IntTy = return CursorTy
 ensureEqualTyModCursor exp (ProdTy ls1) (ProdTy ls2) =
-  sequence_ [ ensureEqualTyModCursor exp ty1 ty2 | (ty1,ty2) <- zip ls1 ls2] >>= \_ -> return (packedToCursor (ProdTy ls1))
+  (sequence_ [ ensureEqualTyModCursor exp ty1 ty2 | (ty1,ty2) <- zip ls1 ls2]) >> return (packedToCursor (ProdTy ls1))
 ensureEqualTyModCursor exp a b = ensureEqualTy exp a b
 
 packedToCursor :: Ty3 -> Ty3
@@ -882,7 +877,7 @@ compareModCursor CursorTy (PackedTy _ _) = True
 compareModCursor (PackedTy _ _) CursorTy = True
 compareModCursor ty1 ty2 = ty1 == ty2
 
-ensureEqualTyNoLoc :: Exp3 -> Ty3 -> Ty3 -> TcM Ty3 (Exp3)
+ensureEqualTyNoLoc :: Exp3 -> Ty3 -> Ty3 -> TcM Ty3 Exp3
 ensureEqualTyNoLoc exp t1 t2 =
   case (t1,t2) of
     (SymDictTy _ _ty1, SymDictTy _ _ty2) -> return t1
@@ -893,7 +888,7 @@ ensureEqualTyNoLoc exp t1 t2 =
                                         then return t1
                                         else ensureEqualTy exp t1 t2
     (ProdTy tys1, ProdTy tys2) -> do
-        checks <- return $ L.map (\(ty1,ty2) -> ensureEqualTyNoLoc exp ty1 ty2) (zip tys1 tys2)
+        let checks = zipWith (ensureEqualTyNoLoc exp) tys1 tys2
         forM_ checks $ \c -> do
             let c' = runExcept c
             case c' of

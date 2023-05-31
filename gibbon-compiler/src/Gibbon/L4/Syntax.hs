@@ -17,6 +17,7 @@ module Gibbon.L4.Syntax
 
 import           Control.DeepSeq
 import           Control.Monad.State.Strict
+import           Data.Bifunctor (second)
 import           Data.Int
 import           Data.Maybe
 import qualified Data.Map as M
@@ -41,12 +42,11 @@ data Prog = Prog
   , mainExp     :: Maybe MainExp
   } deriving (Show, Ord, Eq, Generic, NFData, Out)
 
-data MainExp
+newtype MainExp
   = PrintExp Tail
       -- ^ Evaluate the expression and print the result. Type of the
       -- expression must will eventually be anything, but not all
       -- types support printing currently [2017.01.03].
-
   deriving (Show, Ord, Eq, Generic, NFData, Out)
 
 data Triv
@@ -389,14 +389,14 @@ withTail (tl0,retty) fn =
         -- LetIfT _vr (tst,con,els)  $ fn [VarTriv _vr]
 
     -- Uh oh, here we don't have a LetSwitch form... duplicate code.
-    (Switch lbl trv alts mlast) -> Switch lbl trv <$> mapAltsM go alts <*> sequence (fmap go mlast)
+    (Switch lbl trv alts mlast) -> Switch lbl trv <$> mapAltsM go alts <*> mapM go mlast
     (TailCall x1 x2)        -> do bnds <- genTmps retty
                                   return $ LetCallT False bnds x1 x2 $ fn (map (VarTriv . fst) bnds)
  where
    mapAltsM f (TagAlts ls) = TagAlts <$> sequence [ (tg,) <$> f tl | (tg,tl) <- ls ]
    mapAltsM f (IntAlts ls) = IntAlts <$> sequence [ (tg,) <$> f tl | (tg,tl) <- ls ]
 
-   genTmps (ProdTy ls) = flip zip ls <$> sequence (replicate (length ls) (gensym $ toVar "tctmp"))
+   genTmps (ProdTy ls) = flip zip ls <$> replicateM (length ls) (gensym $ toVar "tctmp")
    genTmps ty          = do t <- gensym (toVar "tctmp"); return [(t,ty)]
 
 fromL3Ty :: L3.Ty3 -> Ty
@@ -449,7 +449,7 @@ inlineTrivL4 (Prog sym_tbl fundefs mb_main) =
                                       ife
                               , bod = go bod }
         LetUnpackT{bod} -> tl { bod = go bod }
-        LetAllocT{vals,bod} -> tl { vals = map (\(a,b) -> (a, inline env b)) vals
+        LetAllocT{vals,bod} -> tl { vals = map (second (inline env)) vals
                                   , bod  = go bod }
         LetAvailT{bod}   -> tl { bod = go bod }
         IfT{tst,con,els} -> IfT (inline env tst) (go con) (go els)
@@ -458,8 +458,8 @@ inlineTrivL4 (Prog sym_tbl fundefs mb_main) =
                                    , bod = go bod }
         Switch lbl trv alts mb_tail ->
           let alts' = case alts of
-                        TagAlts as -> TagAlts $ map (\(a,b) -> (a, go b)) as
-                        IntAlts as -> IntAlts $ map (\(a,b) -> (a, go b)) as
+                        TagAlts as -> TagAlts $ map (second go) as
+                        IntAlts as -> IntAlts $ map (second go) as
           in Switch lbl (inline env trv) alts' (go <$> mb_tail)
         TailCall v trvs -> TailCall v (map (inline env) trvs)
         LetArenaT{bod}  -> tl { bod = go bod }

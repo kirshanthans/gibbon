@@ -28,6 +28,7 @@ import Text.PrettyPrint.GenericPretty
 import Gibbon.Common
 import Gibbon.Language hiding (mapMExprs)
 import qualified Gibbon.L2.Syntax as L2
+import Data.Bifunctor (second)
 
 --------------------------------------------------------------------------------
 
@@ -80,7 +81,7 @@ data E3Ext loc dec =
   | NullCursor                     -- ^ Constant null cursor value (hack?).
                                    --   Used for dict lookup, which returns a packed value but
                                    --   no end witness.
-  | RetE [(PreExp E3Ext loc dec)]  -- ^ Analogous to L2's RetE
+  | RetE [PreExp E3Ext loc dec]  -- ^ Analogous to L2's RetE
   | GetCilkWorkerNum               -- ^ Runs  __cilkrts_get_worker_number()
   | LetAvail [Var] (PreExp E3Ext loc dec) -- ^ These variables are available to use before the join point
   deriving (Show, Ord, Eq, Read, Generic, NFData)
@@ -112,7 +113,7 @@ instance FreeVars (E3Ext l d) where
       BumpArenaRefCount v w -> S.fromList [v, w]
       RetE ls -> S.unions (L.map gFreeVars ls)
       GetCilkWorkerNum   -> S.empty
-      LetAvail ls b      -> (S.fromList ls) `S.union` gFreeVars b
+      LetAvail ls b      -> S.fromList ls `S.union` gFreeVars b
       ReadVector{}  -> error "gFreeVars: ReadVector"
       WriteVector{} -> error "gFreeVars: WriteVector"
 
@@ -129,7 +130,7 @@ instance (Out l, Show l, Typeable (PreExp E3Ext l (UrTy l))) => Typeable (E3Ext 
 
 instance (Show l, Out l) => Flattenable (E3Ext l (UrTy l)) where
     gFlattenGatherBinds _ddfs _env ex = return ([], ex)
-    gFlattenExp _ddfs _env ex = return ex
+    gFlattenExp _ddfs _env = return
 
 instance HasSimplifiableExt E3Ext l d => SimplifiableExt (PreExp E3Ext l d) (E3Ext l d) where
   gInlineTrivExt _ _ = error $ "InlineTriv is not a safe operation to perform on L3." ++
@@ -222,7 +223,7 @@ instance (Out l, Out d) => Out (E3Ext l d)
 eraseLocMarkers :: DDef L2.Ty2 -> DDef Ty3
 eraseLocMarkers (DDef tyargs tyname ls) = DDef tyargs tyname $ L.map go ls
   where go :: (DataCon,[(IsBoxed,L2.Ty2)]) -> (DataCon,[(IsBoxed,Ty3)])
-        go (dcon,ls') = (dcon, L.map (\(b,ty) -> (b,L2.stripTyLocs ty)) ls')
+        go (dcon,ls') = (dcon, L.map (second L2.stripTyLocs) ls')
 
 cursorizeTy :: UrTy a -> UrTy b
 cursorizeTy ty =
@@ -250,14 +251,14 @@ cursorizeTy ty =
 mapMExprs :: Monad m => (Env2 Ty3 -> Exp3 -> m Exp3) -> Prog3 -> m Prog3
 mapMExprs fn (Prog ddfs fundefs mainExp) =
   Prog ddfs <$>
-    (mapM (\f@FunDef{funArgs,funTy,funBody} ->
+    mapM (\f@FunDef{funArgs,funTy,funBody} ->
               let env = Env2 (M.fromList $ zip funArgs (fst funTy)) funEnv
               in do
                 bod' <- fn env funBody
                 return $ f { funBody =  bod' })
-     fundefs)
+     fundefs
     <*>
-    (mapM (\ (e,t) -> (,t) <$> fn (Env2 M.empty funEnv) e) mainExp)
+    mapM (\ (e,t) -> (,t) <$> fn (Env2 M.empty funEnv) e) mainExp
   where funEnv = M.map funTy fundefs
 
 toL3Prim :: Prim L2.Ty2 -> Prim Ty3
