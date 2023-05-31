@@ -63,8 +63,6 @@ instance (Out l, Show l, Show d, Out d, Expression (e l d))
         IfE{}      -> False
         CaseE{}    -> False
         LetE {}    -> False
-        MapE {}    -> False
-        FoldE {}   -> False
         AppE  {}   -> False
         TimeIt {}  -> False
         WithArenaE{} -> False
@@ -95,11 +93,6 @@ instance FreeVars (e l d) => FreeVars (PreExp e l d) where
       MkProdE ls          -> S.unions $ L.map gFreeVars ls
       DataConE _ _ ls     -> S.unions $ L.map gFreeVars ls
       TimeIt e _ _        -> gFreeVars e
-      MapE (v,_t,rhs) bod -> gFreeVars rhs `S.union`
-                             S.delete v (gFreeVars bod)
-      FoldE (v1,_t1,r1) (v2,_t2,r2) bod ->
-          gFreeVars r1 `S.union` gFreeVars r2 `S.union`
-          S.delete v1 (S.delete v2 $ gFreeVars bod)
 
       WithArenaE v e -> S.delete v $ gFreeVars e
 
@@ -131,8 +124,6 @@ instance (Show (), Out (), Expression (e () (UrTy ())),
       MkProdE es       -> ProdTy $ L.map (gRecoverType ddfs env2) es
       DataConE loc c _ -> PackedTy (getTyOfDataCon ddfs c) loc
       TimeIt e _ _     -> gRecoverType ddfs env2 e
-      MapE _ e         -> gRecoverType ddfs env2 e
-      FoldE _ _ e      -> gRecoverType ddfs env2 e
       Ext ext          -> gRecoverType ddfs env2 ext
       ProjE i e ->
         case gRecoverType ddfs env2 e of
@@ -178,14 +169,12 @@ instance HasRenamable e l d => Renamable (PreExp e l d) where
       SyncE   -> SyncE
       WithArenaE v e -> WithArenaE (go v) (go e)
       Ext ext -> Ext (go ext)
-      MapE{}  -> ex
-      FoldE{} -> ex
-     where
-       go :: forall a. Renamable a => a -> a
-       go = gRename env
+    where
+      go :: forall a. Renamable a => a -> a
+      go = gRename env
 
-       gol :: forall a. Renamable a => [a] -> [a]
-       gol = map go
+      gol :: forall a. Renamable a => [a] -> [a]
+      gol = map go
 
 instance Renamable a => Renamable (UrTy a) where
   gRename env = fmap (gRename env)
@@ -270,13 +259,6 @@ subst old new ex =
     SpawnE v loc ls   -> SpawnE v loc (map go ls)
     SyncE             -> SyncE
 
-    MapE (v,t,rhs) bod | v == old  -> MapE (v,t, rhs)    (go bod)
-                       | otherwise -> MapE (v,t, go rhs) (go bod)
-    FoldE (v1,t1,r1) (v2,t2,r2) bod ->
-        let r1' = if v1 == old then r1 else go r1
-            r2' = if v2 == old then r2 else go r2
-        in FoldE (v1,t1,r1') (v2,t2,r2') (go bod)
-
     Ext ext -> Ext (gSubstExt old new ext)
 
     WithArenaE v e | v == old  -> WithArenaE v e
@@ -310,12 +292,6 @@ substE old new ex =
     IfE a b c         -> IfE (go a) (go b) (go c)
     SpawnE v loc ls   -> SpawnE v loc (map go ls)
     SyncE             -> SyncE
-    MapE (v,t,rhs) bod | VarE v == old  -> MapE (v,t, rhs)    (go bod)
-                       | otherwise -> MapE (v,t, go rhs) (go bod)
-    FoldE (v1,t1,r1) (v2,t2,r2) bod ->
-        let r1' = if VarE v1 == old then r1 else go r1
-            r2' = if VarE v2 == old then r2 else go r2
-        in FoldE (v1,t1,r1') (v2,t2,r2') (go bod)
 
     Ext ext -> Ext (gSubstEExt old new ext)
 
@@ -327,25 +303,23 @@ substE old new ex =
 hasTimeIt :: PreExp e l d -> Bool
 hasTimeIt rhs =
     case rhs of
-      TimeIt {} -> True
+      TimeIt {}    -> True
       DataConE{}   -> False
       VarE _       -> False
       LitE _       -> False
       CharE _      -> False
       FloatE{}     -> False
       LitSymE _    -> False
-      AppE {}   -> False
+      AppE {}      -> False
       PrimAppE _ _ -> False
       ProjE _ e    -> hasTimeIt e
       MkProdE ls   -> any hasTimeIt ls
       IfE a b c    -> hasTimeIt a || hasTimeIt b || hasTimeIt c
       CaseE _ ls   -> any hasTimeIt [ e | (_,_,e) <- ls ]
       LetE (_,_,_,e1) e2 -> hasTimeIt e1 || hasTimeIt e2
-      SpawnE {}       -> False
-      SyncE              -> False
-      MapE (_,_,e1) e2   -> hasTimeIt e1 || hasTimeIt e2
-      FoldE (_,_,e1) (_,_,e2) e3 -> hasTimeIt e1 || hasTimeIt e2 || hasTimeIt e3
-      Ext _ -> False
+      SpawnE {}    -> False
+      SyncE        -> False
+      Ext _        -> False
       WithArenaE _ e -> hasTimeIt e
 
 hasSpawnsProg :: Prog (PreExp e l d) -> Bool
@@ -375,10 +349,7 @@ hasSpawns rhs =
       SpawnE{}     -> True
       SyncE        -> False
       TimeIt e _ _ -> hasSpawns e
-      MapE (_,_,e1) e2   -> hasSpawns e1 || hasSpawns e2
-      FoldE (_,_,e1) (_,_,e2) e3 ->
-        hasSpawns e1 || hasSpawns e2 || hasSpawns e3
-      Ext _ -> False
+      Ext _        -> False
       WithArenaE _ e -> hasSpawns e
 
 -- | Project something which had better not be the first thing in a tuple.

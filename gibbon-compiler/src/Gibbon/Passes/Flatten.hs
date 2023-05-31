@@ -185,9 +185,6 @@ exp ddfs env2 e0 =
       (bnd, e') <- go e
       return ([], WithArenaE v (flatLets bnd e'))
 
-    MapE _ _      -> error "FINISHLISTS"
-    FoldE {}   -> error "FINISHLISTS"
-
 -----------------------------------------------------------------------------------------
 
 -- We have duplicate code here because exp depends on Typeable, and it cannot
@@ -281,8 +278,6 @@ flattenExp0 ddfs env2 e0 =
     SpawnE f lvs ls -> gols (SpawnE f lvs)  ls "AppE"
     SyncE -> pure ([], SyncE)
     WithArenaE{}  -> error "flattenL0: WitnArenaE not handled."
-    MapE _ _      -> error "FINISHLISTS"
-    FoldE {}   -> error "FINISHLISTS"
 
     Ext ext ->
       case ext of

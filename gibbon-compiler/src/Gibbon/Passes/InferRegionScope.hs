@@ -166,7 +166,5 @@ inferRegScopeExp ex =
     SpawnE{} -> pure ex
     SyncE{}  -> pure ex
     WithArenaE v e -> WithArenaE v <$> go e
-    MapE{}  -> error "inferRegScopeExp: TODO MapE"
-    FoldE{} -> error "inferRegScopeExp: TODO FoldE"
   where
     go = inferRegScopeExp

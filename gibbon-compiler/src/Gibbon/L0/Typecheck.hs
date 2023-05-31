@@ -738,8 +738,6 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
 
     SyncE   -> pure (sbst, ProdTy [], SyncE)
 
-    MapE{}  -> err $ text "TODO" <+> exp_doc
-    FoldE{} -> err $ text "TODO" <+> exp_doc
   where
     go = tcExp ddefs sbst venv fenv bound_tyvars is_main
     exp_doc = "In the expression: " <+> doc ex
@@ -985,8 +983,6 @@ zonkExp s ex =
     SpawnE fn tyapps args -> let tyapps1 = map (zonkTy s) tyapps
                              in SpawnE fn tyapps1 (map go args)
     SyncE    -> SyncE
-    MapE{}   -> error $ "zonkExp: TODO, " ++ sdoc ex
-    FoldE{}  -> error $ "zonkExp: TODO, " ++ sdoc ex
   where
     go = zonkExp s
 
@@ -1051,8 +1047,6 @@ substTyVarExp s ex =
     SpawnE f tyapps arg -> let tyapps1 = map (substTyVar s) tyapps
                            in SpawnE f tyapps1 (map go arg)
     SyncE    -> SyncE
-    MapE{}   -> error $ "substTyVarExp: TODO, " ++ sdoc ex
-    FoldE{}  -> error $ "substTyVarExp: TODO, " ++ sdoc ex
   where
     go = substTyVarExp s
 

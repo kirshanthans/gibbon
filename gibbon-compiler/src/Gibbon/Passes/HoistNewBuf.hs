@@ -34,8 +34,6 @@ hoistExp _ ex0 = return $ gocap ex0
     (VarE _)      -> ([], e0)
     (AppE {})  -> ([], e0)
     (PrimAppE{})  -> ([], e0)
-    (MapE _ _)    -> error "hoistExp.go: FINISHME MapE"
-    (FoldE {}) -> error "hoistExp.go: FINISHME FoldE"
 
     -- Here's where we lift outside timings!!
     (TimeIt e t b) -> let (lts,e') = go e in

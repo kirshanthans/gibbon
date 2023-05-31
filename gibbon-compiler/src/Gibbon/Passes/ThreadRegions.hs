@@ -278,8 +278,6 @@ threadRegionsExp ddefs fundefs isMain renv env2 lfenv ex =
       return $ TimeIt e' ty b
     SpawnE{} -> error "threadRegionsExp: Unbound SpawnE"
     SyncE    -> pure ex
-    MapE{}  -> error "threadRegionsExp: TODO MapE"
-    FoldE{} -> error "threadRegionsExp: TODO FoldE"
 
   where
     go = threadRegionsExp ddefs fundefs isMain renv env2 lfenv
@@ -333,8 +331,6 @@ findRetLocs e0 = go e0 []
             AddFixed{}        -> acc
             GetCilkWorkerNum  -> acc
             LetAvail _ bod    -> go bod acc
-        MapE{}  -> error "findRetLocs: TODO MapE"
-        FoldE{}  -> error "findRetLocs: TODO FoldE"
 
 ----------------------------------------
 

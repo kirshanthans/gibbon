@@ -78,9 +78,6 @@ inlineTrivExp = go
       SpawnE fn locs args -> SpawnE fn locs $ map (go env) args
       SyncE               -> SyncE
       WithArenaE v e -> WithArenaE v (go env e)
-      MapE (v,t,e') e -> MapE (v,t,go env e') (go env e)
-      FoldE (v1,t1,e1) (v2,t2,e2) e3 ->
-       FoldE (v1,t1,go env e1) (v2,t2,go env e2) (go env e3)
 
 instance HasSimplifiable e l d => Simplifiable (PreExp e l d) where
   gInlineTrivExp = inlineTrivExp

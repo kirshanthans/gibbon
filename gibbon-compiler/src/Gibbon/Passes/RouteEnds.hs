@@ -155,8 +155,6 @@ bindReturns ex =
         LetAvail a bod  -> do
           bod' <- bindReturns bod
           pure $ Ext $ LetAvail a bod'
-    MapE{}  -> error "bindReturns: TODO MapE"
-    FoldE{} -> error "bindReturns: TODO FoldE"
 
 handleScalarRet :: Exp2 -> (Exp2 -> Exp2) -> PassM Exp2
 handleScalarRet bod fn = do
@@ -491,9 +489,6 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
           Ext (LetAvail vs e)  -> Ext . LetAvail vs <$> go e
 
           Ext ext -> error $ "RouteEnds: Shouldn't encounter " ++ sdoc ext
-
-          MapE{} -> error "RouteEnds: todo MapE"
-          FoldE{} -> error "RouteEnds: todo FoldE"
 
         where  mkRet :: [LocVar] -> Exp2 -> PassM Exp2
                mkRet ls (VarE v) =

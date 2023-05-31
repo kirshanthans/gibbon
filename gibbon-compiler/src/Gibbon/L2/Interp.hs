@@ -2,10 +2,10 @@
 {-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE TypeSynonymInstances       #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 -- | Interpreter reducing L2 programs to values.
 module Gibbon.L2.Interp -- ( interpProg, interp )
@@ -61,10 +61,10 @@ instance InterpProg Store Exp2 where
 
 interp :: SizeEnv -> RunConfig -> ValEnv Exp2 -> DDefs Ty2 -> M.Map Var (FunDef Exp2)
        -> Exp2 -> InterpM Store Exp2 (Value Exp2, Size)
-interp szenv rc valenv ddefs fenv e = go valenv szenv e
+interp szenv rc valenv ddefs fenv = go valenv szenv
   where
     {-# NOINLINE goWrapper #-}
-    goWrapper !_ix env sizeEnv ex = go env sizeEnv ex
+    goWrapper !_ix = go
 
     go :: ValEnv Exp2 -> SizeEnv -> Exp2 -> InterpM Store Exp2 (Value Exp2, Size)
     go env sizeEnv ex =
@@ -98,7 +98,7 @@ interp szenv rc valenv ddefs fenv e = go valenv szenv e
                  (M.union (M.fromList $ zip funArgs szs) sizeEnv)
                  funBody
 
-        CaseE _ [] -> error $ "L2.Interp: Empty case"
+        CaseE _ [] -> error "L2.Interp: Empty case"
         CaseE x1 alts -> do
           (scrt, _sizescrt) <- go env sizeEnv x1
           dbgTraceIt (sdoc (x1,scrt,env,sizeEnv)) (pure ())
@@ -110,7 +110,7 @@ interp szenv rc valenv ddefs fenv e = go valenv szenv e
                     S.EmptyL -> error "L1.Interp: case scrutinize on empty/out-of-bounds location."
                     SerTag _tg datacon :< _rst -> do
                       let -- tycon = getTyOfDataCon ddefs datacon
-                          (_dcon,vlocs,rhs) = lookup3 (dbgTrace 3 (show datacon ++ "\n" ++ show alts) $ datacon) alts
+                          (_dcon,vlocs,rhs) = lookup3 (dbgTrace 3 (show datacon ++ "\n" ++ show alts) datacon) alts
                           tys = lookupDataCon ddefs datacon
                       (env', sizeEnv', _off') <- foldlM
                                 (\(aenv, asizeEnv, prev_off) ((v,loc), ty) -> do
@@ -126,7 +126,7 @@ interp szenv rc valenv ddefs fenv e = go valenv szenv e
                                       PackedTy pkd_tycon _ -> do
                                           let current_val = VLoc idx prev_off
                                               aenv' = M.insert v current_val $
-                                                      M.insert loc current_val $
+                                                      M.insert loc current_val
                                                       aenv
                                           let trav_fn = mkTravFunName pkd_tycon
                                           -- Bind v to (SOne -1) in sizeEnv temporarily, just long enough
@@ -134,18 +134,18 @@ interp szenv rc valenv ddefs fenv e = go valenv szenv e
                                           (_, sizev) <- go aenv' (M.insert v (SOne (-1)) sizeEnv) (AppE trav_fn [loc] [VarE v])
                                           let sizeloc = fromJust $ byteSizeOfTy CursorTy
                                               asizeEnv' = M.insert v sizev $
-                                                          M.insert loc (SOne sizeloc) $
+                                                          M.insert loc (SOne sizeloc)
                                                           asizeEnv
-                                          dbgTraceIt (sdoc (v, prev_off, sizev, prev_off + 1 + (sizeToInt sizev))) (pure ())
-                                          pure (aenv', asizeEnv', prev_off + (sizeToInt sizev))
+                                          dbgTraceIt (sdoc (v, prev_off, sizev, prev_off + 1 + sizeToInt sizev)) (pure ())
+                                          pure (aenv', asizeEnv', prev_off + sizeToInt sizev)
                                       scalarty | isScalarTy scalarty -> do
                                         s@(Store store1) <- get
                                         let buf = store1 M.! idx
                                             val  = deserialize ddefs s (dropInBuffer prev_off buf)
                                             aenv' = M.insert v val $
-                                                    M.insert loc (VLoc idx prev_off) $
+                                                    M.insert loc (VLoc idx prev_off)
                                                     aenv
-                                            size = (fromJust $ byteSizeOfTy scalarty)
+                                            size = fromJust $ byteSizeOfTy scalarty
                                             asizeEnv' = M.insert v (SOne size) asizeEnv
                                         pure (aenv', asizeEnv', prev_off + size)
                                       _ -> error $ "L2.Interp: TODO: " ++ sdoc ty)
@@ -264,15 +264,12 @@ interp szenv rc valenv ddefs fenv e = go valenv szenv e
                        tell$ string8 $ "SIZE: " ++show (rcSize rc) ++"\n"
                        tell$ string8 $ "BATCHTIME: "++show tm      ++"\n"
                else tell$ string8 $ "SELFTIMED: "++show tm ++"\n"
-              return $! (val, sz)
+              return (val, sz)
 
         SpawnE f locs args -> go env sizeEnv (AppE f locs args)
-        SyncE -> pure $ (VInt (-1), SOne 0)
+        SyncE -> pure (VInt (-1), SOne 0)
 
         WithArenaE{} -> error "L2.Interp: WithArenE not handled"
-
-        MapE{} -> error $ "L2.Interp: TODO " ++ sdoc ex
-        FoldE{} -> error $ "L2.Interp: TODO " ++ sdoc ex
 
 {-
           DataConE _ k ls -> do
@@ -327,7 +324,7 @@ interpExt sizeEnv rc env ddefs fenv ext =
               case M.lookup v sizeEnv of
                 Nothing -> error $ "L2.Interp: No size info found: " ++ sdoc v
                 Just sz ->
-                  go (M.insert loc (VLoc reg (offset + (sizeToInt sz))) env)
+                  go (M.insert loc (VLoc reg (offset + sizeToInt sz)) env)
                      sizeEnv bod
             Just val ->
               error $ "L2.Interp: Unexpected value for " ++ sdoc loc2 ++ ":" ++ sdoc val
@@ -342,7 +339,7 @@ interpExt sizeEnv rc env ddefs fenv ext =
     BoundsCheck{} -> error $ "L2.Interp: TODO: " ++ sdoc ext
     AddFixed{} -> error $ "L2.Interp: TODO: " ++ sdoc ext
     IndirectionE{} -> error $ "L2.Interp: TODO: " ++ sdoc ext
-    GetCilkWorkerNum{} -> pure $ (VInt 1, SOne (fromJust $ byteSizeOfTy IntTy))
+    GetCilkWorkerNum{} -> pure (VInt 1, SOne (fromJust $ byteSizeOfTy IntTy))
     LetAvail{} -> error $ "L2.Interp: TODO: " ++ sdoc ext
 
   where
@@ -418,7 +415,7 @@ data SerializedVal
 byteSize :: SerializedVal -> Int
 byteSize (SerTag{})   = 1
 byteSize (SerBool{})  = 1
-byteSize (SerPad)     = 1
+byteSize SerPad     = 1
 byteSize (SerInt{})   = 8
 byteSize (SerChar{})  = 1
 byteSize (SerFloat{}) = 8

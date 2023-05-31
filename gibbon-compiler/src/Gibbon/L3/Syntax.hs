@@ -289,9 +289,6 @@ updateAvailVars froms tos ex =
     SpawnE v loc ls   -> SpawnE v loc (map go ls)
     SyncE             -> SyncE
     WithArenaE v e    -> WithArenaE v (go e)
-    MapE (v,t,rhs) bod -> MapE (v,t, go rhs) (go bod)
-    FoldE (v1,t1,r1) (v2,t2,r2) bod ->
-      FoldE (v1,t1,go r1) (v2,t2,go r2) (go bod)
     Ext ext ->
       case ext of
         LetAvail vs bod ->

@@ -60,8 +60,6 @@ inferExp fenv expr =
     DataConE _loc _dcon es -> any go es
     TimeIt e _ _           -> go e
     WithArenaE _v e -> go e
-    MapE{}  -> error "inferFunAllocs: MapE not handled."
-    FoldE{} -> error "inferFunAllocs: FoldE not handled."
     Ext (LetRegionE{})     -> True
     Ext (LetParRegionE{})  -> True
     Ext (LetLocE _ _ rhs)  -> go rhs

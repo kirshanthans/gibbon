@@ -683,9 +683,6 @@ tcExp ddfs env exp =
     Ext (AddFixed{})-> -- throwError $ GenericTC "AddFixed not handled." exp
       pure CursorTy
 
-    MapE{} -> error $ "L1.Typecheck: TODO: " ++ sdoc exp
-    FoldE{} -> error $ "L1.Typecheck: TODO: " ++ sdoc exp
-
   where
     go = tcExp ddfs env
 

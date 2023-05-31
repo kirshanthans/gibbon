@@ -766,10 +766,6 @@ tcExp ddfs env funs constrs regs tstatein exp =
               let env' = extendVEnv v ArenaTy env
               tcExp ddfs env' funs constrs regs tstatein e
 
-      MapE _ _ -> throwError $ UnsupportedExpTC exp
-
-      FoldE _ _ _ -> throwError $ UnsupportedExpTC exp
-
       Ext (LetRegionE r _ _ e) -> do
                regs' <- regionInsert exp r regs
                (ty,tstate) <- tcExp ddfs env funs constrs regs' tstatein e

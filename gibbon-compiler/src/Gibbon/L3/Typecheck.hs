@@ -760,9 +760,6 @@ tcExp isPacked ddfs env exp =
       let env' = extendVEnv v ArenaTy env
       tcExp isPacked ddfs env' e
 
-    MapE{}  -> throwError $ UnsupportedExpTC exp
-    FoldE{} -> throwError $ UnsupportedExpTC exp
-
     -- oth -> error $ "L1.tcExp : TODO " ++ sdoc oth
 
   where

@@ -45,6 +45,7 @@ import           Gibbon.Common
 import           Gibbon.Language
 import           Text.PrettyPrint.HughesPJ
 import           Gibbon.L1.Syntax hiding (AddFixed)
+import Data.Bifunctor (second)
 
 --------------------------------------------------------------------------------
 
@@ -305,7 +306,7 @@ data ArrowTy2 = ArrowTy2
     { locVars :: [LRM]          -- ^ Universally-quantified location params.
                                 -- Only these should be referenced in arrIn/arrOut.
     , arrIns  :: [Ty2]          -- ^ Input type for the function.
-    , arrEffs :: (S.Set Effect) -- ^ These are present-but-empty initially,
+    , arrEffs :: S.Set Effect -- ^ These are present-but-empty initially,
                                 -- and the populated by InferEffects.
     , arrOut  :: Ty2            -- ^ Output type for the function.
     , locRets :: [LocRet]       -- ^ L2B feature: multi-valued returns.
@@ -314,7 +315,7 @@ data ArrowTy2 = ArrowTy2
   deriving (Read,Show,Eq,Ord, Generic, NFData)
 
 -- | The side-effect of evaluating a function.
-data Effect = Traverse LocVar
+newtype Effect = Traverse LocVar
               -- ^ The function, during its execution, traverses all
               -- of the value living at this location.
   deriving (Read,Show,Eq,Ord, Generic, NFData)
@@ -436,8 +437,6 @@ instance Typeable (PreExp E2Ext LocVar (UrTy LocVar)) where
       MkProdE es       -> ProdTy $ L.map (gRecoverType ddfs env2) es
       DataConE loc c _ -> PackedTy (getTyOfDataCon ddfs c) loc
       TimeIt e _ _     -> gRecoverType ddfs env2 e
-      MapE _ e         -> gRecoverType ddfs env2 e
-      FoldE _ _ e      -> gRecoverType ddfs env2 e
       Ext ext          -> gRecoverType ddfs env2 ext
       ProjE i e ->
         case gRecoverType ddfs env2 e of
@@ -510,7 +509,7 @@ substLoc mp ty =
 
 -- | List version of 'substLoc'.
 substLocs :: M.Map LocVar LocVar -> [Ty2] -> [Ty2]
-substLocs mp tys = L.map (substLoc mp) tys
+substLocs mp = L.map (substLoc mp)
 
 -- | Extend an environment for a pattern match. E.g.
 --
@@ -527,7 +526,7 @@ extendPatternMatchEnv dcon ddefs vars locs env2 =
                (\(loc,ty) acc ->
                   case locsInTy ty of
                     []     -> ty:acc
-                    [loc2] -> (substLoc (M.singleton loc2 loc) ty) : acc
+                    [loc2] -> substLoc (M.singleton loc2 loc) ty : acc
                     _  -> error $ "extendPatternMatchEnv': Found more than 1 location in type: " ++ sdoc ty)
                []
                (fragileZip locs tys)
@@ -542,11 +541,10 @@ substEff mp (Traverse v) =
 
 -- | Apply a substitution to an effect set.
 substEffs :: M.Map LocVar LocVar -> S.Set Effect -> S.Set Effect
-substEffs mp effs =
-    S.map (\ef -> substEff mp ef) effs
+substEffs mp = S.map (substEff mp)
 
 dummyTyLocs :: Applicative f => UrTy () -> f (UrTy LocVar)
-dummyTyLocs ty = traverse (const (pure (toVar "dummy"))) ty
+dummyTyLocs = traverse (const (pure (toVar "dummy")))
 
 -- | Collect all the locations mentioned in a type.
 locsInTy :: Ty2 -> [LocVar]
@@ -572,7 +570,7 @@ revertDDef :: DDef Ty2 -> DDef Ty1
 revertDDef (DDef tyargs a b) =
   DDef tyargs a
     (L.filter (\(dcon,_) -> not $ isIndirectionTag dcon) $
-         L.map (\(dcon,tys) -> (dcon, L.map (\(x,y) -> (x, stripTyLocs y)) tys)) b)
+         L.map (second (L.map (second stripTyLocs))) b)
 
 revertFunDef :: FunDef2 -> FunDef1
 revertFunDef FunDef{funName,funArgs,funTy,funBody,funMeta} =
@@ -593,9 +591,9 @@ revertExp ex =
     LitSymE v -> LitSymE v
     AppE v _ args   -> AppE v [] (L.map revertExp args)
     PrimAppE p args -> PrimAppE (revertPrim p) $ L.map revertExp args
-    LetE (v,_,ty, (Ext (IndirectionE _ _ _ _ arg))) bod ->
+    LetE (v,_,ty, Ext (IndirectionE _ _ _ _ arg)) bod ->
       let PackedTy tycon _ =  ty in
-          LetE (v,[],(stripTyLocs ty), AppE (mkCopyFunName tycon) [] [revertExp arg]) (revertExp bod)
+          LetE (v,[],stripTyLocs ty, AppE (mkCopyFunName tycon) [] [revertExp arg]) (revertExp bod)
     LetE (v,_,ty,rhs) bod ->
       LetE (v,[], stripTyLocs ty, revertExp rhs) (revertExp bod)
     IfE a b c  -> IfE (revertExp a) (revertExp b) (revertExp c)
@@ -619,13 +617,11 @@ revertExp ex =
         IndirectionE{}  -> error "revertExp: TODO IndirectionE"
         GetCilkWorkerNum-> LitE 0
         LetAvail _ bod  -> revertExp bod
-    MapE{}  -> error $ "revertExp: TODO MapE"
-    FoldE{} -> error $ "revertExp: TODO FoldE"
 
 -- Ugh .. this is bad. Can we remove the identity cases here ?
 -- TODO: Get rid of this (and L3.toL3Prim) soon.
 revertPrim :: Prim Ty2 -> Prim Ty1
-revertPrim pr = fmap stripTyLocs pr
+revertPrim = fmap stripTyLocs
 
 docase :: (DataCon, [(Var,LocVar)], Exp2) -> (DataCon, [(Var,())], Exp1)
 docase (dcon,vlocs,rhs) =
@@ -676,8 +672,6 @@ occurs w ex =
           v1 `S.member` w  || v2 `S.member` w || go ib
         GetCilkWorkerNum -> False
         LetAvail _ bod -> go bod
-    MapE{}  -> error "occurs: TODO MapE"
-    FoldE{} -> error "occurs: TODO FoldE"
   where
     go = occurs w
 
@@ -754,8 +748,6 @@ depList = L.map (\(a,b) -> (a,a,b)) . M.toList . go M.empty
           WithArenaE _ e -> go acc e
           SpawnE _ _ ls  -> foldl go acc ls
           SyncE          -> acc
-          MapE{}  -> acc
-          FoldE{} -> acc
           Ext ext ->
             case ext of
               LetRegionE r _ _ rhs ->
@@ -786,18 +778,18 @@ depList = L.map (\(a,b) -> (a,a,b)) . M.toList . go M.empty
 allFreeVars :: Exp2 -> S.Set Var
 allFreeVars ex =
   case ex of
-    AppE _ locs args -> S.fromList locs `S.union` (S.unions (map allFreeVars args))
-    PrimAppE _ args -> (S.unions (map allFreeVars args))
-    LetE (v,locs,_,rhs) bod -> (S.fromList locs `S.union` (allFreeVars rhs) `S.union` (allFreeVars bod))
+    AppE _ locs args -> S.fromList locs `S.union` S.unions (map allFreeVars args)
+    PrimAppE _ args -> S.unions (map allFreeVars args)
+    LetE (v,locs,_,rhs) bod -> (S.fromList locs `S.union` allFreeVars rhs `S.union` allFreeVars bod)
                                `S.difference` S.singleton v
     IfE a b c -> allFreeVars a `S.union` allFreeVars b `S.union` allFreeVars c
-    MkProdE args -> (S.unions (map allFreeVars args))
+    MkProdE args -> S.unions (map allFreeVars args)
     ProjE _ bod -> allFreeVars bod
-    CaseE scrt brs -> (allFreeVars scrt) `S.union` (S.unions (map (\(_,vlocs,c) -> allFreeVars c `S.difference` S.fromList (map fst vlocs)) brs))
-    DataConE loc _ args -> S.singleton loc `S.union` (S.unions (map allFreeVars args))
+    CaseE scrt brs -> allFreeVars scrt `S.union` S.unions (map (\(_,vlocs,c) -> allFreeVars c `S.difference` S.fromList (map fst vlocs)) brs)
+    DataConE loc _ args -> S.singleton loc `S.union` S.unions (map allFreeVars args)
     TimeIt e _ _ -> allFreeVars e
     WithArenaE _ e -> allFreeVars e
-    SpawnE _ locs args -> S.fromList locs `S.union` (S.unions (map allFreeVars args))
+    SpawnE _ locs args -> S.fromList locs `S.union` S.unions (map allFreeVars args)
     Ext ext ->
       case ext of
         LetRegionE r _ _ bod -> S.delete (regionToVar r) (allFreeVars bod)
@@ -806,7 +798,7 @@ allFreeVars ex =
         RetE locs v     -> S.insert v (S.fromList locs)
         FromEndE loc    -> S.singleton loc
         BoundsCheck _ reg cur -> S.fromList [reg,cur]
-        IndirectionE _ _ (a,b) (c,d) _ -> S.fromList $ [a,b,c,d]
+        IndirectionE _ _ (a,b) (c,d) _ -> S.fromList [a,b,c,d]
         AddFixed v _    -> S.singleton v
         GetCilkWorkerNum-> S.empty
         LetAvail vs bod -> S.fromList vs `S.union` gFreeVars bod
@@ -846,7 +838,4 @@ changeAppToSpawn v args2 ex1 =
         AddFixed{}        -> ex1
         GetCilkWorkerNum  -> ex1
         LetAvail vs bod   -> Ext $ LetAvail vs (go bod)
-    MapE{}  -> error "addRANExp: TODO MapE"
-    FoldE{}  -> error "addRANExp: TODO FoldE"
-
   where go = changeAppToSpawn v args2

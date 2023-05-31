@@ -137,9 +137,6 @@ findWitnesses p@Prog{fundefs} = mapMExprs fn p
             else IfE (go mp a) -- Otherwise we duplicate...
                      (go mp b)
                      (go mp c)
-        -- Like MkProdE
-        MapE  (v,t,rhs) bod -> handle' $ MapE (v,t,rhs) (goClear bod)
-        FoldE (v1,t1,r1) (v2,t2,r2) bod -> handle' $ FoldE (v1,t1,r1) (v2,t2,r2) (goClear bod)
         WithArenaE{} -> error "findWitnesses: WithArenaE not handled."
 
 

@@ -711,7 +711,7 @@ inferExp env@FullEnv{dataDefs} ex0 dest =
                                                          -- ((map Just $ L.tail ([a | (a,_,_) <- ls' ])) ++ [Nothing])
                                                         argLs
                                                          -- (map Just locs)
-                                                        ((map Just $ L.tail locs) ++ [Nothing])
+                                                        (map Just (L.tail locs) ++ [Nothing])
                                                         (map Just locs))
                                                          -- ((map Just $ L.tail locs) ++ [Nothing])) ++
                                       in tmpconstrs ++ constrs
@@ -1114,9 +1114,6 @@ inferExp env@FullEnv{dataDefs} ex0 dest =
           tryBindReg (L2.LetE (vr,[],ty,TimeIt e' ty b) bod'',
                     ty'', fcs)
 
-        MapE{} -> err "MapE unsupported"
-        FoldE{} -> err "FoldE unsupported"
-
         Ext (L1.AddFixed cur i) -> do
           (bod',ty',cs') <- inferExp (extendVEnv vr CursorTy env) bod dest
           return (L2.LetE (vr,[],L2.CursorTy,L2.Ext (L2.AddFixed cur i)) bod', ty', cs')
@@ -1124,8 +1121,6 @@ inferExp env@FullEnv{dataDefs} ex0 dest =
         Ext(BenchE{}) -> error "inferExp: BenchE not handled."
 
     LetE{} -> err$ "Malformed let expression: " ++ show ex0
-    MapE{} -> err "MapE unsupported"
-    FoldE{} -> err "FoldE unsupported"
     -- Just-in-time convert this to TimeIt
     Ext (BenchE fn locs args b) ->
       let fn_ty = lookupFEnv fn env
@@ -1223,8 +1218,6 @@ finishExp e =
              return $ Ext (LetLocE loc' lex' e1')
       Ext (L2.AddFixed cur i) -> pure $ Ext (L2.AddFixed cur i)
       Ext{} -> err$ "Unexpected Ext: " ++ show e
-      MapE{} -> err "MapE not supported"
-      FoldE{} -> err "FoldE not supported"
 
 finishTy :: Ty2 -> TiM Ty2
 finishTy t =
@@ -1329,8 +1322,6 @@ cleanExp e =
                                               S.delete loc $ S.union s' $ S.fromList ls)
                                     else (e',s')
       Ext{} -> err$ "Unexpected Ext: " ++ show e
-      MapE{} -> err "MapE not supported"
-      FoldE{} -> err "FoldE not supported"
 
 projTups :: Ty2 -> Exp1 -> Exp1 -> TiM Exp1
 projTups t proj e =
@@ -1393,8 +1384,6 @@ fixProj renam pvar proj e =
       SyncE -> SyncE
       WithArenaE v e -> WithArenaE v $ fixProj renam pvar proj e
       Ext{} -> err$ "Unexpected Ext: " ++ show e
-      MapE{} -> err "MapE not supported"
-      FoldE{} -> err "FoldE not supported"
 
 
 -- Runs after projTups in the SpawnE case in inferExp.
@@ -1434,8 +1423,6 @@ moveProjsAfterSync sv ex = go [] (S.singleton sv) ex
                      LetParRegionE r sz ty bod -> Ext $ LetParRegionE r sz ty $ go acc1 pending bod
                      LetLocE a b bod -> Ext $ LetLocE a b $ go acc1 pending bod
                      oth -> error $ "moveProjsAfterSync: extension not handled." ++ sdoc oth
-        MapE{}  -> error "moveProjsAfterSync: todo MapE"
-        FoldE{} -> error "moveProjsAfterSync: todo FoldE"
 
 
 -- | Checks that there are no constraints specifying a location
@@ -1857,9 +1844,6 @@ fixRANs prg@(Prog defs funs main) = do
           (bnd, e') <- go e
           return (bnd, WithArenaE v e')
 
-        MapE _ _      -> error "FINISHLISTS"
-        FoldE {}   -> error "FINISHLISTS"
-
 
 --------------------------------------------------------------------------------
 
@@ -2034,18 +2018,16 @@ copyOutOfOrderPacked prg@(Prog ddfs fndefs mnExp) = do
                                ls
           pure (cpy_env1, Ext (BenchE fn locs ls1 b))
         Ext (L1.AddFixed{}) -> pure (cpy_env, ex)
-        MapE{}  -> error "copyOutOfOrderPacked: todo MapE"
-        FoldE{} -> error "copyOutOfOrderPacked: todo FoldE"
 
 -- Updating environment correctly for some branches. 
 updateCpyEnv :: [(Var, [(Var, Var)])] -> [(Var, [(Var, Var)])]
 updateCpyEnv env = case env of
       [] -> []
       x:xs -> let (key, val) = x
-                  commonKeys = concatMap (\(a, b) -> [(a, b) | (fromVar a) == (fromVar key)] ) xs
-                  commonVals = concatMap (snd) commonKeys
+                  commonKeys = concatMap (\(a, b) -> [(a, b) | fromVar a == fromVar key] ) xs
+                  commonVals = concatMap snd commonKeys
                   commonValNew = commonVals ++ val
-                  removedKeys = concatMap (\(a, b) -> [(a, b) | not ((fromVar a) == (fromVar key))] ) xs
+                  removedKeys = concatMap (\(a, b) -> [(a, b) | fromVar a /= fromVar key] ) xs
                 in (key, commonValNew) : updateCpyEnv removedKeys
 
 
@@ -2154,8 +2136,6 @@ removeAliases exp env = case exp of
                         pure $ SpawnE f locs args'
   SyncE -> pure exp
   Ext _ -> pure exp
-  MapE{} ->  error "removeAliasesForCopyCalls: todo MapE"
-  FoldE{} -> error "removeAliasesForCopyCalls: todo FoldE"
 
 
 
@@ -2314,7 +2294,7 @@ freeVarsInOrder exp = case exp of
   LitSymE _ -> []
   ProjE _ e -> freeVarsInOrder e
   IfE a b c -> freeVarsInOrder a ++ freeVarsInOrder b ++ freeVarsInOrder c
-  AppE v _ ls         -> v : (concatMap freeVarsInOrder ls)
+  AppE v _ ls         -> v : concatMap freeVarsInOrder ls
   PrimAppE _ ls        -> concatMap freeVarsInOrder ls
   LetE (v,_,_,rhs) bod -> freeVarsInOrder rhs ++ deleteOne v (freeVarsInOrder bod)
   CaseE e ls -> freeVarsInOrder e ++ concatMap (\(_, vlocs, ee) ->
@@ -2323,11 +2303,8 @@ freeVarsInOrder exp = case exp of
   MkProdE ls          -> concatMap freeVarsInOrder ls
   DataConE _ _ ls     -> concatMap freeVarsInOrder ls
   TimeIt e _ _        -> freeVarsInOrder e
-  MapE (v,_t,rhs) bod -> freeVarsInOrder rhs ++ deleteOne v (freeVarsInOrder bod)
-  FoldE (v1,_t1,r1) (v2,_t2,r2) bod ->
-      freeVarsInOrder r1 ++ freeVarsInOrder r2 ++ deleteOne v1 (deleteOne v2 $ freeVarsInOrder bod)
 
   WithArenaE v e -> deleteOne v $ freeVarsInOrder e
 
-  SpawnE v _ ls -> v : L.concat (L.map freeVarsInOrder ls)
+  SpawnE v _ ls -> v : concatMap freeVarsInOrder ls
   SyncE -> []

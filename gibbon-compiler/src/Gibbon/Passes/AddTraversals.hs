@@ -99,8 +99,6 @@ addTraversalsExp ddefs fundefs env2 renv context ex =
           in Ext . LetLocE loc locexp <$>
                addTraversalsExp ddefs fundefs env2 (M.insert loc reg renv) context bod
         _ -> return ex
-    MapE{}  -> error "addTraversalsExp: TODO MapE"
-    FoldE{} -> error "addTraversalsExp: TODO FoldE"
 
   where
     go = addTraversalsExp ddefs fundefs env2 renv context

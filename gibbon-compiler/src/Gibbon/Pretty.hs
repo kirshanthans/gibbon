@@ -411,8 +411,6 @@ instance HasPrettyToo e l d => Pretty (PreExp e l d) where
                                             pprintWithStyle sty e
                               PPInternal -> text "letarena" <+> pprint v <+> text "in" $+$ pprint e
           Ext ext -> pprintWithStyle sty ext
-          MapE{} -> error "Unexpected form in program: MapE"
-          FoldE{} -> error "Unexpected form in program: FoldE"
         where
           dobinds (dc,vls,e) = text dc <+> hcat (punctuate (text " ")
                                                            (map (\(v,loc) -> if isEmpty (pprintWithStyle sty loc)
@@ -602,8 +600,6 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
         WithArenaE _ e -> go e
         SpawnE{}-> False
         SyncE   -> False
-        MapE{}  -> error "hasBenchE: TODO MapE"
-        FoldE{} -> error "hasBenchE: TODO FoldE"
       where go = hasBenchE
 
     sty = PPHaskell
@@ -712,8 +708,6 @@ pprintHsWithEnv p@Prog{ddefs,fundefs,mainExp} =
                text "t2 <- getCurrentTime" $+$
                text "print (diffUTCTime t2 t1)" $+$
                text "print x"
-          MapE{} -> error "Unexpected form in program: MapE"
-          FoldE{}-> error "Unexpected form in program: FoldE"
         where
           dobinds env21 (dc,vls,e) =
                            let tys    = lookupDataCon ddefs dc

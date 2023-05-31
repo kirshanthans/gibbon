@@ -197,8 +197,6 @@ addRANExp dont_change_datacons needRANsTyCons ddfs ienv ex =
     SpawnE f locs args -> SpawnE f locs <$> mapM go args
     SyncE   -> pure SyncE
     Ext _   -> return ex
-    MapE{}  -> error "addRANExp: TODO MapE"
-    FoldE{} -> error "addRANExp: TODO FoldE"
 
   where
     go = addRANExp dont_change_datacons needRANsTyCons ddfs ienv
@@ -226,8 +224,6 @@ addRANExp dont_change_datacons needRANsTyCons ddfs ienv ex =
         SpawnE f locs args -> AppE f locs $ map changeSpawnToApp args
         SyncE   -> SyncE
         Ext{}   -> ex1
-        MapE{}  -> error "addRANExp: TODO MapE"
-        FoldE{} -> error "addRANExp: TODO FoldE"
 
     doalt :: (DataCon, [(Var,())], Exp1) -> PassM [(DataCon, [(Var,())], Exp1)]
     doalt (dcon,vs,bod) = do
@@ -453,8 +449,6 @@ we need random access for that type.
                         FreeLE -> error "addRANExp: FreeLE not handled"
             in needsRANExp ddefs fundefs env2 (M.insert loc reg renv) tcenv parlocss bod
         _ -> S.empty
-    MapE{}     -> S.empty
-    FoldE{}    -> S.empty
   where
     go = needsRANExp ddefs fundefs env2 renv tcenv parlocss
 

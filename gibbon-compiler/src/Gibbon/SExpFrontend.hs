@@ -116,73 +116,67 @@ bracketHacks = T.map $ \case '[' -> '('
 tagDataCons :: DDefs Ty0 -> Exp0 -> PassM Exp0
 tagDataCons ddefs = go allCons
   where
-   allCons = S.fromList [  toVar con
-                        | DDef{dataCons} <- M.elems ddefs
-                        , (con,_tys) <- dataCons ]
+    allCons = S.fromList [  toVar con
+                          | DDef{dataCons} <- M.elems ddefs
+                          , (con,_tys) <- dataCons ]
 
-   go :: S.Set Var -> Exp0 -> PassM Exp0
-   go cons ex =
-     case ex of
-       -- [2019.02.01] CSK: Do we need this special case ?
-       AppE v _ ls
-                  | S.member v cons -> do
-                      ty <- newMetaTy
-                      DataConE ty (fromVar v) <$> mapM (go cons) ls
-       AppE v l ls | S.member v cons -> do ty <- newMetaTy
-                                           DataConE ty (fromVar v) <$> mapM (go cons) ls
-                   | otherwise       -> AppE v l <$> mapM (go cons) ls
+    go :: S.Set Var -> Exp0 -> PassM Exp0
+    go cons ex =
+      case ex of
+        -- [2019.02.01] CSK: Do we need this special case ?
+        AppE v _ ls
+                    | S.member v cons -> do
+                        ty <- newMetaTy
+                        DataConE ty (fromVar v) <$> mapM (go cons) ls
+        AppE v l ls | S.member v cons -> do ty <- newMetaTy
+                                            DataConE ty (fromVar v) <$> mapM (go cons) ls
+                    | otherwise       -> AppE v l <$> mapM (go cons) ls
 
-       SpawnE v _ ls
-                  | S.member v cons -> do
-                      ty <- newMetaTy
-                      DataConE ty (fromVar v) <$> mapM (go cons) ls
-       SpawnE v l ls | S.member v cons -> do ty <- newMetaTy
-                                             DataConE ty (fromVar v) <$> mapM (go cons) ls
-                   | otherwise       -> SpawnE v l <$> mapM (go cons) ls
+        SpawnE v _ ls
+                    | S.member v cons -> do
+                        ty <- newMetaTy
+                        DataConE ty (fromVar v) <$> mapM (go cons) ls
+        SpawnE v l ls | S.member v cons -> do ty <- newMetaTy
+                                              DataConE ty (fromVar v) <$> mapM (go cons) ls
+                    | otherwise       -> SpawnE v l <$> mapM (go cons) ls
 
-       LetE (v,l,t,rhs) bod -> do
-         let go' = if S.member v cons
-                      then go (S.delete v cons)
-                      else go cons
-         LetE . (v,l,t,) <$> go' rhs <*> go' bod
-       ------------boilerplate------------
-       VarE{}          -> pure ex
-       LitSymE{}       -> pure ex
-       LitE _          -> pure ex
-       CharE _         -> pure ex
-       FloatE _        -> pure ex
-       PrimAppE p ls   -> PrimAppE p <$> mapM (go cons) ls
-       ProjE i e  -> ProjE i <$> go cons e
-       CaseE e ls -> CaseE <$> go cons e <*> mapM (\(c,vs,er) -> (c,vs,) <$> go cons er) ls
-       MkProdE ls     -> MkProdE <$> mapM (go cons) ls
-       DataConE loc k ls -> DataConE loc k <$> mapM (go cons) ls
-       TimeIt e t b -> do e' <- go cons e
-                          pure $ TimeIt e' t b
-       IfE a b c -> IfE <$> go cons a <*> go cons b <*> go cons c
-       WithArenaE v e -> WithArenaE v <$> go cons e
+        LetE (v,l,t,rhs) bod -> do
+          let go' = if S.member v cons
+                        then go (S.delete v cons)
+                        else go cons
+          LetE . (v,l,t,) <$> go' rhs <*> go' bod
+        ------------boilerplate------------
+        VarE{}          -> pure ex
+        LitSymE{}       -> pure ex
+        LitE _          -> pure ex
+        CharE _         -> pure ex
+        FloatE _        -> pure ex
+        PrimAppE p ls   -> PrimAppE p <$> mapM (go cons) ls
+        ProjE i e  -> ProjE i <$> go cons e
+        CaseE e ls -> CaseE <$> go cons e <*> mapM (\(c,vs,er) -> (c,vs,) <$> go cons er) ls
+        MkProdE ls     -> MkProdE <$> mapM (go cons) ls
+        DataConE loc k ls -> DataConE loc k <$> mapM (go cons) ls
+        TimeIt e t b -> do e' <- go cons e
+                           pure $ TimeIt e' t b
+        IfE a b c -> IfE <$> go cons a <*> go cons b <*> go cons c
+        WithArenaE v e -> WithArenaE v <$> go cons e
 
-       MapE  (v,t,e) bod -> MapE . (v,t, ) <$> go cons e <*> go cons bod
-       FoldE (v1,t1,e1) (v2,t2,e2) b -> do
-         e1' <- go cons e1
-         e2' <- go cons e2
-         b'  <- go cons b
-         pure $ FoldE (v1,t1,e1') (v2,t2,e2') b'
-       SyncE -> pure SyncE
-       Ext (LambdaE bnds e) -> Ext . LambdaE bnds <$> go cons e
-       Ext (PolyAppE a b)   -> do
-         a' <- go cons a
-         b' <- go cons b
-         pure $ Ext $ PolyAppE a' b'
-       Ext (FunRefE{}) -> pure ex
-       Ext (BenchE v tyapps es b) -> do
-         es' <- mapM (go cons) es
-         pure $ Ext $ BenchE v tyapps es' b
-       Ext (ParE0 ls) -> Ext . ParE0 <$> mapM (go cons) ls
-       Ext (PrintPacked ty arg) -> Ext . PrintPacked ty <$> go cons arg
-       Ext (CopyPacked ty arg) -> Ext . CopyPacked ty <$> go cons arg
-       Ext (TravPacked ty arg) -> Ext . TravPacked ty <$> go cons arg
-       Ext (L p e)    -> Ext . L p <$> go cons e
-       Ext (LinearExt{}) -> error "tagDataCons: SExpFrontend doesn't support linear types yet."
+        SyncE -> pure SyncE
+        Ext (LambdaE bnds e) -> Ext . LambdaE bnds <$> go cons e
+        Ext (PolyAppE a b)   -> do
+          a' <- go cons a
+          b' <- go cons b
+          pure $ Ext $ PolyAppE a' b'
+        Ext (FunRefE{}) -> pure ex
+        Ext (BenchE v tyapps es b) -> do
+          es' <- mapM (go cons) es
+          pure $ Ext $ BenchE v tyapps es' b
+        Ext (ParE0 ls) -> Ext . ParE0 <$> mapM (go cons) ls
+        Ext (PrintPacked ty arg) -> Ext . PrintPacked ty <$> go cons arg
+        Ext (CopyPacked ty arg) -> Ext . CopyPacked ty <$> go cons arg
+        Ext (TravPacked ty arg) -> Ext . TravPacked ty <$> go cons arg
+        Ext (L p e)    -> Ext . L p <$> go cons e
+        Ext (LinearExt{}) -> error "tagDataCons: SExpFrontend doesn't support linear types yet."
 
 
 -- | Convert from raw, unstructured S-Expression into the L1 program datatype we expect.
@@ -449,25 +443,6 @@ exp se =
      ty <- newMetaTy
      arg' <- exp arg
      pure $ Ext $ L (toLoc l) $ Ext $ TravPacked ty arg'
-
-
-   Ls3 l "for/list" (Ls1 (Ls4 _ v ":" t e)) bod -> do
-     e'   <- exp e
-     bod' <- exp bod
-     pure $ Ext $ L (toLoc l) $ MapE (textToVar v, typ t, e') bod'
-
-   -- I don't see why we need the extra type annotation:
-   Ls4 l "for/fold"
-          (Ls1 (Ls4 _ v1 ":" t1 e1))
-          (Ls1 (Ls4 _ v2 ":" t2 e2))
-          bod -> do
-     e1'  <- exp e1
-     e2'  <- exp e2
-     bod' <- exp bod
-     pure $ Ext $ L (toLoc l) $
-                   FoldE (textToVar v1, typ t1, e1')
-                          (textToVar v2, typ t2, e2')
-                          bod'
 
    Ls2 l "eqBenchProg" (G _ (HSString str)) ->
      pure $ Ext (L (toLoc l) (PrimAppE (EqBenchProgP (T.unpack str)) []))

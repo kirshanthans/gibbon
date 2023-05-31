@@ -468,8 +468,6 @@ lower Prog{fundefs,ddefs,mainExp} = do
               RetE ls -> gol ls
               GetCilkWorkerNum -> syms
               LetAvail _ bod   -> collect_syms syms bod
-          MapE{}         -> syms
-          FoldE{}        -> syms
 
 
   tail :: Bool -> M.Map String Word16 -> Exp3 -> PassM T.Tail

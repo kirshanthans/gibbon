@@ -357,9 +357,6 @@ cursorizeExp ddfs fundefs denv tenv senv ex =
 
         LetAvail vs bod  -> Ext . L3.LetAvail vs <$> go bod
 
-    MapE{} -> error "TODO: cursorizeExp MapE"
-    FoldE{} -> error "TODO: cursorizeExp FoldE"
-
   where
     go = cursorizeExp ddfs fundefs denv tenv senv
 
@@ -567,9 +564,6 @@ cursorizePackedExp ddfs fundefs denv tenv senv ex =
         GetCilkWorkerNum -> pure $ Di (Ext L3.GetCilkWorkerNum)
 
         LetAvail vs bod  -> onDi (Ext . L3.LetAvail vs) <$> go tenv senv bod
-
-    MapE{}  -> error "TODO: cursorizePackedExp MapE"
-    FoldE{} -> error "TODO: cursorizePackedExp FoldE"
 
   where go = cursorizePackedExp ddfs fundefs denv
         dl = Di

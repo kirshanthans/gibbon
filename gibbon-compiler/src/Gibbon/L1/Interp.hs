@@ -150,12 +150,14 @@ interp rc valenv ddefs fenv = go valenv
                       en <- liftIO $ getTime clk
                       let tm = fromIntegral (toNanoSecs $ diffTimeSpec en st)
                                 / 10e9 :: Double
-                      if isIter
-                       then do tell$ string8 $ "ITERS: "++show iters       ++"\n"
-                               tell$ string8 $ "SIZE: " ++show (rcSize rc) ++"\n"
-                               tell$ string8 $ "BATCHTIME: "++show tm      ++"\n"
-                       else tell$ string8 $ "SELFTIMED: "++show tm ++"\n"
+                      if isIter then do 
+                        tellAll ["ITERS: ", show iters, "\n"]
+                        tellAll ["SIZE: ", show (rcSize rc), "\n"]
+                        tellAll ["BATCHTIME: ", show tm, "\n"]
+                      else tellAll ["SELFTIMED: ", show tm, "\n"]
                       return $! val
+                        where
+                          tellAll = tell . string8 . mconcat
 
                   SpawnE f locs args -> go env (AppE f locs args)
                   SyncE -> pure $ VInt (-1)
@@ -169,10 +171,7 @@ interp rc valenv ddefs fenv = go valenv
                                    VBool flg -> if flg
                                                 then go env b
                                                 else go env c
-                                   oth -> error$ "interp: expected bool, got: "++show oth
-
-                  MapE _ _bod    -> error "L1.Interp: finish MapE"
-                  FoldE _ _ _bod -> error "L1.Interp: finish FoldE"
+                                   oth -> error $ "interp: expected bool, got: " ++ show oth
 
     -- _applySortP :: ValEnv (PreExp e l d) -> [(Value (PreExp e l d))] -> Var -> WriterT InterpLog IO (Value (PreExp e l d))
     -- _applySortP env ls f = do
@@ -290,7 +289,7 @@ applyPrim rc p args =
    (PrintSym, [VInt n]) -> do
        tell $ string8 (show n)
        pure $ VProd []
-   oth -> error $ "unhandled prim or wrong number of arguments: "++show oth
+   oth -> error $ "unhandled prim or wrong number of arguments: " ++ show oth
 
   where
      replaceNth :: Int -> a -> [a] -> [a]

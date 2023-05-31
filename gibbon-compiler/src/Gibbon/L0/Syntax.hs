@@ -517,8 +517,6 @@ recoverType ddfs env2 ex =
     DataConE (ProdTy locs) c _ -> PackedTy (getTyOfDataCon ddfs c) locs
     DataConE loc c _ -> PackedTy (getTyOfDataCon ddfs c) [loc]
     TimeIt e _ _     -> recoverType ddfs env2 e
-    MapE _ e         -> recoverType ddfs env2 e
-    FoldE _ _ e      -> recoverType ddfs env2 e
     ProjE i e ->
       case recoverType ddfs env2 e of
         (ProdTy tys) -> tys !! i

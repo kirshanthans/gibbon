@@ -179,8 +179,6 @@ toL1 Prog{ddefs, fundefs, mainExp} =
         SpawnE{} -> err1 (sdoc ex)
         SyncE            -> SyncE
         WithArenaE v e -> WithArenaE v (toL1Exp e)
-        MapE{}  -> err1 (sdoc ex)
-        FoldE{} -> err1 (sdoc ex)
         Ext ext ->
           case ext of
             LambdaE{}  -> err2 (sdoc ex)
@@ -623,8 +621,6 @@ collectMonoObls ddefs env2 toplevel ex =
       f' <- addFnObl f tyapps'
       pure $ SpawnE f' [] args'
     SyncE    -> pure SyncE
-    MapE{}  -> error $ "collectMonoObls: TODO: " ++ sdoc ex
-    FoldE{} -> error $ "collectMonoObls: TODO: " ++ sdoc ex
   where
     go = collectMonoObls ddefs env2 toplevel
 
@@ -725,8 +721,6 @@ monoLambdas ex =
                  pure $ SpawnE f [] args'
         _  -> error $ "monoLambdas: Expression probably not processed by collectMonoObls: " ++ sdoc ex
     SyncE   -> pure SyncE
-    MapE{}  -> error $ "monoLambdas: TODO: " ++ sdoc ex
-    FoldE{} -> error $ "monoLambdas: TODO: " ++ sdoc ex
   where go = monoLambdas
 
         monoLamBinds :: [(Var,[Ty0])] -> (Ty0, Exp0) -> MonoM [(Var, [Ty0], Ty0, Exp0)]
@@ -803,8 +797,6 @@ updateTyConsExp ddefs mono_st ex =
     WithArenaE v e -> WithArenaE v (go e)
     SpawnE fn tyapps args -> SpawnE fn tyapps (map go args)
     SyncE   -> SyncE
-    MapE{}  -> error $ "updateTyConsExp: TODO: " ++ sdoc ex
-    FoldE{} -> error $ "updateTyConsExp: TODO: " ++ sdoc ex
     Ext (LambdaE args bod) -> Ext (LambdaE (map (second (updateTyConsTy ddefs mono_st)) args) (go bod))
     Ext (PolyAppE a b) -> Ext (PolyAppE (go a) (go b))
     Ext (FunRefE{})    -> ex
@@ -1132,8 +1124,6 @@ specLambdasExp ddefs env2 ex =
         AppE fn' tyapps' args' -> pure $ SpawnE fn' tyapps' args'
         _ -> error "specLambdasExp: SpawnE"
     SyncE   -> pure SyncE
-    MapE{}  -> error $ "specLambdasExp: TODO: " ++ sdoc ex
-    FoldE{} -> error $ "specLambdasExp: TODO: " ++ sdoc ex
     Ext ext ->
       case ext of
         LambdaE{}  -> error $ "specLambdasExp: Should reach a LambdaE. It should be floated out by the Let case." ++ sdoc ex
@@ -1216,8 +1206,6 @@ specLambdasExp ddefs env2 ex =
                             brs
         SpawnE _ _ args -> foldr collectFunRefs acc args
         SyncE     -> acc
-        MapE{}  -> error $ "collectFunRefs: TODO: " ++ sdoc e
-        FoldE{} -> error $ "collectFunRefs: TODO: " ++ sdoc e
         Ext ext ->
           case ext of
             LambdaE _ bod       -> collectFunRefs bod acc
@@ -1255,8 +1243,6 @@ specLambdasExp ddefs env2 ex =
                             brs
         SpawnE _ _ args -> foldr collectAllFuns acc args
         SyncE     -> acc
-        MapE{}  -> error $ "collectAllFuns: TODO: " ++ sdoc e
-        FoldE{} -> error $ "collectAllFuns: TODO: " ++ sdoc e
         Ext ext ->
           case ext of
             LambdaE _ bod       -> collectAllFuns bod acc
@@ -1349,8 +1335,6 @@ bindLambdas prg@Prog{fundefs,mainExp} = do
         (AppE f tyapps args) -> do
           (ltss,args') <- unzip <$> mapM go args
           pure (concat ltss, AppE f tyapps args')
-        (MapE _ _)    -> error "bindLambdas: FINISHME MapE"
-        (FoldE {}) -> error "bindLambdas: FINISHME FoldE"
         (LetE (v,tyapps,t,rhs) bod) -> do
            (lts1, rhs') <- go rhs
            bod' <- gocap bod
@@ -1507,8 +1491,6 @@ desugarL0 (Prog ddefs fundefs' mainExp') = do
         WithArenaE v e -> WithArenaE v <$> go e
         SpawnE fn tyapps args -> SpawnE fn tyapps <$> mapM go args
         SyncE   -> pure SyncE
-        MapE{}  -> err1 (sdoc ex)
-        FoldE{} -> err1 (sdoc ex)
         Ext ext ->
           case ext of
             LambdaE{}  -> err1 (sdoc ex)
@@ -1706,8 +1688,6 @@ floatOutCase (Prog ddefs fundefs mainExp) = do
     (mainExp',state') <- runStateT float_m fundefs
     pure (Prog ddefs state' mainExp')
   where
-    err1 msg = error $ "floatOutCase: " ++ msg
-
     float_fn :: Env2 Ty0 -> Exp0 -> FloatM Exp0
     float_fn env2 ex = do
       fundefs' <- get
@@ -1761,8 +1741,6 @@ floatOutCase (Prog ddefs fundefs mainExp) = do
         SpawnE fn tyapps args -> SpawnE fn tyapps <$> mapM recur args
         SyncE   -> pure SyncE
         Ext{}   -> pure ex
-        MapE{}  -> err1 (sdoc ex)
-        FoldE{} -> err1 (sdoc ex)
 
       where
         recur = go float env2

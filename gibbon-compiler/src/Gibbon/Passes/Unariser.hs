@@ -193,8 +193,6 @@ unariserExp isTerminal ddfs stk env2 ex =
         bod' <- go isTerminal env2 bod
         return$ Ext $ LetAvail vs bod'
     Ext{}   -> return ex
-    MapE{}  -> error "unariserExp: MapE TODO"
-    FoldE{} -> error "unariserExp: FoldE TODO"
 
   where
     go isTerminal' = unariserExp isTerminal' ddfs stk

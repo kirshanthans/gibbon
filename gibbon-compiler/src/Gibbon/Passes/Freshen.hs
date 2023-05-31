@@ -245,17 +245,6 @@ freshExp venv tvenv exp =
 
     SyncE -> pure SyncE
 
-    MapE (v,t,b) e -> do
-      b' <- go b
-      e' <- go e
-      return $ MapE (v,t,b') e'
-
-    FoldE (v1,t1,e1) (v2,t2,e2) e3 -> do
-      e1' <- go e1
-      e2' <- go e2
-      e3' <- go e3
-      return $ FoldE (v1,t1,e1') (v2,t2,e2') e3'
-
     -- Ext ext -> Ext <$> gFreshenExp venv tvenv ext
 
     Ext ext ->
@@ -388,17 +377,6 @@ freshExp1 vs exp =
         Just v' -> return $ SpawnE (cleanFunName v') [] ls'
 
     SyncE -> pure SyncE
-
-    MapE (v,t,b) e -> do
-      b' <- freshExp1 vs b
-      e' <- freshExp1 vs e
-      return $ MapE (v,t,b') e'
-
-    FoldE (v1,t1,e1) (v2,t2,e2) e3 -> do
-      e1' <- freshExp1 vs e1
-      e2' <- freshExp1 vs e2
-      e3' <- freshExp1 vs e3
-      return $ FoldE (v1,t1,e1') (v2,t2,e2') e3'
 
     WithArenaE{} -> error "freshExp1: WithArenaE not handled."
 

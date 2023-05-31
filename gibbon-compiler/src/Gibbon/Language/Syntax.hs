@@ -373,14 +373,6 @@ data PreExp (ext :: Type -> Type -> Type) loc dec =
    | SpawnE Var [loc] [PreExp ext loc dec]
    | SyncE
 
-   -- Limited list handling:
-   -- TODO: RENAME to "Array".
-   -- TODO: Replace with Generate, add array reference.
-   | MapE  (Var,dec, PreExp ext loc dec) (PreExp ext loc dec)
-   | FoldE { initial  :: (Var,dec,PreExp ext loc dec)
-           , iterator :: (Var,dec,PreExp ext loc dec)
-           , body     :: PreExp ext loc dec }
-
    ----------------------------------------
   | Ext (ext loc dec) -- ^ Extension point for downstream language extensions.
 

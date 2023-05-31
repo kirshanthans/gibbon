@@ -121,8 +121,6 @@ removeCopiesExp ddefs fundefs lenv env2 ex =
       return $ WithArenaE v e'
     SpawnE{}-> pure ex
     SyncE   -> pure ex
-    MapE{}  -> error "go: TODO MapE"
-    FoldE{} -> error "go: TODO FoldE"
   where
     go = removeCopiesExp ddefs fundefs lenv env2
     docase reg lenv1 env21 (dcon,vlocs,bod) = do
