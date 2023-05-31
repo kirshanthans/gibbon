@@ -15,23 +15,24 @@ import Gibbon.L1.Syntax as L1
 type Exp = (L Exp0)
 type VarMap = Map Var Exp
 
-specialize :: CurFun -> CCall -> (L0Fun, (CCall -> FCall))
+specialize :: CurFun -> CCall -> (L0Fun, CCall -> FCall)
 specialize f@VarDef {varTy=ty, varBody} call = (newFunc, callFunc)
-  where args     = reverse $ getArgs call
-        varMap   = varsToArgs (getVars varBody) args
-        newTy    = updateTy ty [] args
-        newFunc  = specializeFunc f newTy varMap
-        callFunc = \ x -> updateCall x $ funName newFunc
+  where
+    callFunc x = updateCall x $ funName newFunc
+    args     = reverse $ getArgs call
+    varMap   = varsToArgs (getVars varBody) args
+    newTy    = updateTy ty [] args
+    newFunc  = specializeFunc f newTy varMap
 
 varsToArgs :: [Var] -> [Exp] -> VarMap
 varsToArgs vs as = M.fromList $ L.filter f $ L.zip vs as
-  where f = \ p -> not $ isVarE $ snd p
+  where f p = not $ isVarE $ snd p
 
 updateTy :: Ty0 -> [Ty0] -> [Exp] -> (Ty0,Ty0)
 updateTy (ArrowTy t0 t1) _ [] = (t0,t1)
-updateTy (ArrowTy t0 t1) ts (a:[]) = if isVarE a
-                                     then (L0.ProdTy $ reverse (t0:ts), t1) -- have to reverse to match order of args
-                                     else (L0.ProdTy $ reverse ts, t1)
+updateTy (ArrowTy t0 t1) ts [a] = if isVarE a
+                                  then (L0.ProdTy $ reverse (t0:ts), t1) -- have to reverse to match order of args
+                                  else (L0.ProdTy $ reverse ts, t1)
 updateTy (ArrowTy t0 t1) ts (a:as) = if isVarE a
                                      then updateTy t1 (t0:ts) as
                                      else updateTy t1 ts as
@@ -94,19 +95,19 @@ specializeFunc VarDef {varName, varBody} (t0 , t1) varMap =
           MkProdE ls    -> L loc $ MkProdE $ L.map go ls
           ProjE i x     -> L loc $ ProjE i $ go x
           -- application, change name if necessary
-          AppE a ls d   -> if (a == varName)
+          AppE a ls d   -> if a == varName
                            then L loc $ AppE newName ls $ go d
                            else L loc $ AppE a ls $ go d
           IfE p t f     -> L loc $ IfE (go p) (go t) (go f)
           DataConE ls k as   -> L loc $ DataConE ls k $ L.map go as
           CaseE k ls         -> L loc $ CaseE (go k) $ L.map f ls
-                                 where f = (\ (ds,vs,es) -> (ds,vs,go es))
+                                 where f (ds,vs,es) = (ds,vs,go es)
           LetE (x,ls,d,a) bd -> L loc $ LetE (x,ls,d, go a) $ go bd
           TimeIt x d p       -> L loc $ TimeIt (go x) d p
           ParE a b           -> L loc $ ParE (go a) (go b)
           Ext (PolyAppE a d) -> L loc $ Ext $ PolyAppE (go a) (go d)
-          MapE _ _     -> error $ "not implemented"
-          FoldE _ _ _  -> error $ "not implemented"
+          MapE _ _     -> error "not implemented"
+          FoldE {}  -> error "not implemented"
           where go = specializeFB vM
 
 
@@ -119,7 +120,7 @@ replaceLam (L _ (Ext (LambdaE (var,_) body))) ex = replace var ex body
       replace v e expr@(L loc b) =
         case b of
           VarE v2 | v == v2 -> e
-          VarE _    -> error $ "unbound variable in lambda"
+          VarE _    -> error "unbound variable in lambda"
           LitE _    -> expr
           LitSymE _ -> expr
           PrimAppE p ls -> L loc $ PrimAppE p $ L.map go ls
@@ -134,8 +135,8 @@ replaceLam (L _ (Ext (LambdaE (var,_) body))) ex = replace var ex body
           ParE a c           -> L loc $ ParE (go a) (go c)
           Ext (LambdaE x bd) -> L loc $ Ext $ LambdaE x $ go bd
           Ext (PolyAppE a d) -> L loc $ Ext $ PolyAppE (go a) (go d)
-          MapE _ _     -> error $ "not implemented"
-          FoldE _ _ _  -> error $ "not implemented"
+          MapE _ _     -> error "not implemented"
+          FoldE {}  -> error "not implemented"
           where go = replace v e
 replaceLam e _ = error $ "replaceLam: Not a lambda: " ++ show e
 
@@ -162,7 +163,7 @@ getArgs (L _ call) =
     _                  -> []
 
 collectArgs :: CCall -> [Exp]
-collectArgs = L.filter isVarE . reverse . getArgs
+collectArgs = reverse . filter isVarE . getArgs
 
 getVars :: Exp -> [Var]
 getVars (L _ ex) =

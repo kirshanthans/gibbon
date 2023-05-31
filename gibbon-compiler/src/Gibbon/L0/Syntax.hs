@@ -25,6 +25,7 @@ import qualified Data.Map as M
 
 import           Gibbon.Common as C
 import           Gibbon.Language hiding (UrTy(..))
+import Data.Bifunctor
 
 --------------------------------------------------------------------------------
 
@@ -45,8 +46,8 @@ data E0Ext loc dec =
             (PreExp E0Ext loc dec) -- Operand
  | FunRefE [loc] Var -- Reference to a function (toplevel or lambda),
                      -- along with its tyapps.
- | BenchE Var [loc] [(PreExp E0Ext loc dec)] Bool
- | ParE0 [(PreExp E0Ext loc dec)]
+ | BenchE Var [loc] [PreExp E0Ext loc dec] Bool
+ | ParE0 [PreExp E0Ext loc dec]
  | PrintPacked dec (PreExp E0Ext loc dec) -- ^ Print a packed value to standard out.
  | CopyPacked dec (PreExp E0Ext loc dec) -- ^ Copy a packed value.
  | TravPacked dec (PreExp E0Ext loc dec) -- ^ Traverse a packed value.
@@ -84,7 +85,7 @@ instance Read t => Read (Loc.L t) where
   readsPrec n str = [ (Loc.L Loc.NoLoc a,s) | (a,s) <- readsPrec n str ]
 
 instance Out Loc.Loc where
-  docPrec _ loc = doc loc
+  docPrec = const doc
 
   doc loc =
     case loc of
@@ -92,7 +93,7 @@ instance Out Loc.Loc where
       Loc.NoLoc -> PP.empty
 
 instance Out Loc.Pos where
-  docPrec _ pos = doc pos
+  docPrec = const doc
   doc (Loc.Pos path line col _) = hcat [doc path, colon, doc line, colon, doc col]
 
 --------------------------------------------------------------------------------
@@ -101,7 +102,7 @@ instance Out Loc.Pos where
 instance FreeVars (E0Ext l d) where
   gFreeVars e =
     case e of
-      LambdaE args bod -> foldr S.delete (gFreeVars bod) (map fst args)
+      LambdaE args bod -> foldr (S.delete . fst) (gFreeVars bod) args
       PolyAppE f d     -> gFreeVars f `S.union` gFreeVars d
       FunRefE _ f      -> S.singleton f
       BenchE _ _ args _-> S.unions (map gFreeVars args)
@@ -119,7 +120,7 @@ instance (Out l, Out d, Show l, Show d) => Expression (E0Ext l d) where
 
 instance (Show l, Out l) => Flattenable (E0Ext l Ty0) where
     gFlattenGatherBinds _ddfs _env ex = return ([], ex)
-    gFlattenExp _ddfs _env ex = return ex
+    gFlattenExp _ddfs _env = return
 
 instance HasSubstitutableExt E0Ext l d => SubstitutableExt (PreExp E0Ext l d) (E0Ext l d) where
   gSubstExt old new ext =
@@ -142,16 +143,16 @@ instance HasSubstitutableExt E0Ext l d => SubstitutableExt (PreExp E0Ext l d) (E
       FunRefE{}        -> ext
       BenchE fn tyapps args b -> BenchE fn tyapps (map (gSubstE old new) args) b
       ParE0 ls -> ParE0 $ map (gSubstE old new) ls
-      PrintPacked ty e -> PrintPacked ty $ (gSubstE old new e)
-      CopyPacked ty e -> CopyPacked ty $ (gSubstE old new e)
-      TravPacked ty e -> TravPacked ty $ (gSubstE old new e)
-      L p e    -> L p $ (gSubstE old new e)
+      PrintPacked ty e -> PrintPacked ty (gSubstE old new e)
+      CopyPacked ty e -> CopyPacked ty (gSubstE old new e)
+      TravPacked ty e -> TravPacked ty (gSubstE old new e)
+      L p e    -> L p (gSubstE old new e)
       LinearExt e -> LinearExt (gSubstEExt old new e)
 
 instance HasRenamable E0Ext l d => Renamable (E0Ext l d) where
   gRename env ext =
     case ext of
-      LambdaE args bod -> LambdaE (map (\(a,b) -> (go a, go b)) args) (go bod)
+      LambdaE args bod -> LambdaE (map (bimap go go) args) (go bod)
       PolyAppE a b     -> PolyAppE (go a) (go b)
       FunRefE tyapps a -> FunRefE (map go tyapps) (go a)
       BenchE fn tyapps args b -> BenchE fn (map go tyapps) (map go args) b
@@ -175,7 +176,7 @@ instance Out TyScheme
 instance FreeVars (LinearExt l d) where
   gFreeVars e =
     case e of
-      ReverseAppE fn arg -> gFreeVars fn `S.union` (gFreeVars arg)
+      ReverseAppE fn arg -> gFreeVars fn `S.union` gFreeVars arg
       LseqE a b   -> gFreeVars a `S.union` gFreeVars b
       AliasE a    -> gFreeVars a
       ToLinearE a -> gFreeVars a
@@ -187,7 +188,7 @@ instance (Out l, Out d, Show l, Show d) => Expression (LinearExt l d) where
 
 instance (Show l, Out l) => Flattenable (LinearExt l Ty0) where
     gFlattenGatherBinds _ddfs _env ex = return ([], ex)
-    gFlattenExp _ddfs _env ex = return ex
+    gFlattenExp _ddfs _env = return
 
 instance HasSubstitutableExt E0Ext l d => SubstitutableExt (PreExp E0Ext l d) (LinearExt l d) where
   gSubstExt old new ext =
@@ -219,12 +220,12 @@ instance (Out l, Out d) => Out (LinearExt l d)
 
 --------------------------------------------------------------------------------
 
-data MetaTv = Meta Int
+newtype MetaTv = Meta Int
   deriving (Read, Show, Eq, Ord, Generic, NFData)
 
 instance Out MetaTv where
   doc (Meta i) = text "$" PP.<> doc i
-  docPrec _ v = doc v
+  docPrec = const doc
 
 newMetaTv :: MonadState Int m => m MetaTv
 newMetaTv = Meta <$> newUniq
@@ -331,11 +332,11 @@ saturateCall sigma ex =
     AppE f [] args -> do
       -- # args needed to saturate this call-site.
       let args_wanted = length (arrIns sigma) - length args
-      new_args <- mapM (\_ -> gensym "sat_arg_") [0..(args_wanted-1)]
-      new_tys  <- mapM (\_ -> newMetaTy) new_args
+      new_args <- mapM (const $ gensym "sat_arg_") [0..(args_wanted-1)]
+      new_tys  <- mapM (const newMetaTy) new_args
       pure $
         Ext (LambdaE (zip new_args new_tys)
-               (AppE f [] (args ++ (map VarE new_args))))
+               (AppE f [] (args ++ map VarE new_args)))
 
     AppE _ tyapps _ ->
       error $ "saturateCall: Expected tyapps to be [], got: " ++ sdoc tyapps
@@ -347,7 +348,7 @@ tyVarsInTy ty = tyVarsInTys [ty]
 
 -- | Like 'tyVarsInTy'.
 tyVarsInTys :: [Ty0] -> [TyVar]
-tyVarsInTys tys = foldr (go []) [] tys
+tyVarsInTys = foldr (go []) []
   where
     go :: [TyVar] -> Ty0 -> [TyVar] -> [TyVar]
     go bound ty acc =
@@ -357,7 +358,7 @@ tyVarsInTys tys = foldr (go []) [] tys
         FloatTy-> acc
         SymTy0 -> acc
         BoolTy -> acc
-        TyVar tv -> if (tv `elem` bound) || (tv `elem` acc)
+        TyVar tv -> if tv `elem` bound || tv `elem` acc
                     then acc
                     else tv : acc
         MetaTv _ -> acc
@@ -379,7 +380,7 @@ metaTvsInTy ty = metaTvsInTys [ty]
 
 -- | Like 'metaTvsInTy'.
 metaTvsInTys :: [Ty0] -> [MetaTv]
-metaTvsInTys tys = foldr go [] tys
+metaTvsInTys = foldr go []
   where
     go :: Ty0 -> [MetaTv] -> [MetaTv]
     go ty acc =
@@ -415,7 +416,7 @@ metaTvsInTyScheme (ForAll _ ty) = metaTvsInTy ty -- ForAll binds TyVars only
 
 -- | Like 'metaTvsInTys'.
 metaTvsInTySchemes :: [TyScheme] -> [MetaTv]
-metaTvsInTySchemes tys = concatMap metaTvsInTyScheme tys
+metaTvsInTySchemes = concatMap metaTvsInTyScheme
 
 arrowTysInTy :: Ty0 -> [Ty0]
 arrowTysInTy = go []

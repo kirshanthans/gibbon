@@ -7,24 +7,25 @@ module Gibbon.L0.Typecheck where
 
 import           Control.Monad.State ( MonadState )
 import           Control.Monad.Except
-#if !MIN_VERSION_base(4,13,0)
--- https://downloads.haskell.org/ghc/8.8.1/docs/html/users_guide/8.8.1-notes.html
-import           Control.Monad.Fail(MonadFail(..))
-#endif
+
+
+
+
 import           Data.Foldable ( foldlM )
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import           Text.PrettyPrint hiding ( (<>) )
 import           Text.PrettyPrint.GenericPretty
-#if !MIN_VERSION_base(4,11,0)
-import           Data.Semigroup
-#endif
+
+
+
 
 import           Gibbon.L0.Syntax as L0
 import           Gibbon.Common
 import           Data.Function
 import           Data.Bitraversable
+import Data.Bifunctor (second)
 
 --------------------------------------------------------------------------------
 
@@ -159,37 +160,37 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
 
           bool_ops = do
             len2
-            s2 <- unify (args !! 0) BoolTy (arg_tys' !! 0)
+            s2 <- unify (head args) BoolTy (head arg_tys')
             s3 <- unify (args !! 1) BoolTy (arg_tys' !! 1)
             pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
           int_ops = do
             len2
-            s2 <- unify (args !! 0) IntTy (arg_tys' !! 0)
+            s2 <- unify (head args) IntTy (head arg_tys')
             s3 <- unify (args !! 1) IntTy (arg_tys' !! 1)
             pure (s1 <> s2 <> s3, IntTy, PrimAppE pr args_tc)
 
           int_cmps = do
             len2
-            s2 <- unify (args !! 0) IntTy (arg_tys' !! 0)
+            s2 <- unify (head args) IntTy (head arg_tys')
             s3 <- unify (args !! 1) IntTy (arg_tys' !! 1)
             pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
           float_ops = do
             len2
-            s2 <- unify (args !! 0) FloatTy (arg_tys' !! 0)
+            s2 <- unify (head args) FloatTy (head arg_tys')
             s3 <- unify (args !! 1) FloatTy (arg_tys' !! 1)
             pure (s1 <> s2 <> s3, FloatTy, PrimAppE pr args_tc)
 
           float_cmps = do
             len2
-            s2 <- unify (args !! 0) FloatTy (arg_tys' !! 0)
+            s2 <- unify (head args) FloatTy (head arg_tys')
             s3 <- unify (args !! 1) FloatTy (arg_tys' !! 1)
             pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
-          
+
           char_cmps = do
             len2
-            s2 <- unify (args !! 0) CharTy (arg_tys' !! 0)
+            s2 <- unify (head args) CharTy (head arg_tys')
             s3 <- unify (args !! 1) CharTy (arg_tys' !! 1)
             pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
@@ -221,11 +222,11 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         OrP     -> bool_ops
         AndP    -> bool_ops
 
-        Gensym -> len0 >>= \_ -> pure (sbst, SymTy0, PrimAppE pr args_tc)
+        Gensym -> len0 >> pure (sbst, SymTy0, PrimAppE pr args_tc)
 
         EqSymP -> do
           len2
-          s2 <- unify (args !! 0) SymTy0 (arg_tys' !! 0)
+          s2 <- unify (head args) SymTy0 (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
@@ -237,47 +238,47 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         FRandP-> pure (s1, FloatTy, PrimAppE pr args_tc)
         FSqrtP -> do
           len1
-          s2 <- unify (args !! 0) FloatTy (arg_tys' !! 0)
+          s2 <- unify (head args) FloatTy (head arg_tys')
           pure (s1 <> s2, FloatTy, PrimAppE pr args_tc)
 
         FTanP -> do
           len1
-          s2 <- unify (args !! 0) FloatTy (arg_tys' !! 0)
+          s2 <- unify (head args) FloatTy (head arg_tys')
           pure (s1 <> s2, FloatTy, PrimAppE pr args_tc)
 
         FloatToIntP -> do
           len1
-          s2 <- unify (args !! 0) FloatTy (arg_tys' !! 0)
+          s2 <- unify (head args) FloatTy (head arg_tys')
           pure (s1 <> s2, IntTy, PrimAppE pr args_tc)
 
         IntToFloatP -> do
           len1
-          s2 <- unify (args !! 0) IntTy (arg_tys' !! 0)
+          s2 <- unify (head args) IntTy (head arg_tys')
           pure (s1 <> s2, FloatTy, PrimAppE pr args_tc)
 
         PrintInt -> do
           len1
-          s2 <- unify (args !! 0) IntTy (arg_tys' !! 0)
+          s2 <- unify (head args) IntTy (head arg_tys')
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         PrintChar -> do
           len1
-          s2 <- unify (args !! 0) CharTy (arg_tys' !! 0)
+          s2 <- unify (head args) CharTy (head arg_tys')
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         PrintFloat -> do
           len1
-          s2 <- unify (args !! 0) FloatTy (arg_tys' !! 0)
+          s2 <- unify (head args) FloatTy (head arg_tys')
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         PrintBool -> do
           len1
-          s2 <- unify (args !! 0) BoolTy (arg_tys' !! 0)
+          s2 <- unify (head args) BoolTy (head arg_tys')
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         PrintSym -> do
           len1
-          s2 <- unify (args !! 0) SymTy0 (arg_tys' !! 0)
+          s2 <- unify (head args) SymTy0 (head arg_tys')
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         ReadInt -> do
@@ -290,13 +291,13 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
 
         SymSetInsert -> do
           len2
-          s2 <- unify (args !! 0) SymSetTy (arg_tys' !! 0)
+          s2 <- unify (head args) SymSetTy (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           pure (s1 <> s2 <> s3, SymSetTy, PrimAppE pr args_tc)
 
         SymSetContains -> do
           len2
-          s2 <- unify (args !! 0) SymSetTy (arg_tys' !! 0)
+          s2 <- unify (head args) SymSetTy (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
@@ -306,28 +307,28 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
 
         SymHashInsert -> do
           len3
-          s2 <- unify (args !! 0) SymHashTy (arg_tys' !! 0)
+          s2 <- unify (head args) SymHashTy (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           s4 <- unify (args !! 2) SymTy0 (arg_tys' !! 2)
           pure (s1 <> s2 <> s3 <> s4, SymHashTy, PrimAppE pr args_tc)
 
         SymHashLookup -> do
           len2
-          s2 <- unify (args !! 0) SymHashTy (arg_tys' !! 0)
+          s2 <- unify (head args) SymHashTy (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           pure (s1 <> s2 <> s3, SymTy0, PrimAppE pr args_tc)
 
         SymHashContains -> do
           len2
-          s2 <- unify (args !! 0) SymHashTy (arg_tys' !! 0)
+          s2 <- unify (head args) SymHashTy (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
         DictEmptyP ty -> do
           len1
           let [a] = arg_tys'
-          s2 <- unify (args !! 0) ArenaTy a
-          case args !! 0 of
+          s2 <- unify (head args) ArenaTy a
+          case head args of
             (VarE var) ->
                 pure (s1 <> s2, SymDictTy (Just var) ty,
                          PrimAppE pr args_tc)
@@ -342,8 +343,8 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
           s2 <- unify (args !! 1) (SymDictTy Nothing ty) d
           s3 <- unify (args !! 2) SymTy0 k
           s4 <- unify (args !! 3) ty v
-          s5 <- unify (args !! 0) ArenaTy a
-          case args !! 0 of
+          s5 <- unify (head args) ArenaTy a
+          case head args of
             (VarE var) -> pure (s1 <> s2 <> s3 <> s4 <> s5,
                                        SymDictTy (Just var) ty,
                                        PrimAppE pr args_tc)
@@ -355,14 +356,14 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         DictLookupP ty -> do
           len2
           let [d,k] = arg_tys'
-          s2 <- unify (args !! 0) (SymDictTy Nothing ty) d
+          s2 <- unify (head args) (SymDictTy Nothing ty) d
           s3 <- unify (args !! 1) SymTy0 k
           pure (s1 <> s2 <> s3, ty, PrimAppE pr args_tc)
 
         DictHasKeyP ty -> do
           len2
           let [d,k] = arg_tys'
-          s2 <- unify (args !! 0) (SymDictTy Nothing ty) d
+          s2 <- unify (head args) (SymDictTy Nothing ty) d
           s3 <- unify (args !! 1) SymTy0 k
           pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
@@ -372,52 +373,52 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
 
         IntHashInsert -> do
           len3
-          s2 <- unify (args !! 0) IntHashTy (arg_tys' !! 0)
+          s2 <- unify (head args) IntHashTy (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           s4 <- unify (args !! 2) IntTy (arg_tys' !! 2)
           pure (s1 <> s2 <> s3 <> s4, IntHashTy, PrimAppE pr args_tc)
 
         IntHashLookup -> do
           len2
-          s2 <- unify (args !! 0) IntHashTy (arg_tys' !! 0)
+          s2 <- unify (head args) IntHashTy (head arg_tys')
           s3 <- unify (args !! 1) SymTy0 (arg_tys' !! 1)
           pure (s1 <> s2 <> s3, IntTy, PrimAppE pr args_tc)
 
         VAllocP elty -> do
           len1
           let [i] = arg_tys'
-          s2 <- unify (args !! 0) IntTy i
+          s2 <- unify (head args) IntTy i
           pure (s1 <> s2, VectorTy elty, PrimAppE pr args_tc)
 
         VFreeP elty -> do
           len1
           let [i] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy elty) i
+          s2 <- unify (head args) (VectorTy elty) i
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         VFree2P elty -> do
           len1
           let [i] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy elty) i
+          s2 <- unify (head args) (VectorTy elty) i
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         VLengthP elty -> do
           len1
           let [ls] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy elty) ls
+          s2 <- unify (head args) (VectorTy elty) ls
           pure (s1 <> s2, IntTy, PrimAppE pr args_tc)
 
         VNthP elty -> do
           len2
           let [ls,i] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy elty) ls
+          s2 <- unify (head args) (VectorTy elty) ls
           s3 <- unify (args !! 1) IntTy i
           pure (s1 <> s2 <> s3, elty, PrimAppE pr args_tc)
 
         VSliceP elty -> do
           len3
           let [from,to,ls] = arg_tys'
-          s2 <- unify (args !! 0) IntTy from
+          s2 <- unify (head args) IntTy from
           s3 <- unify (args !! 1) IntTy to
           s4 <- unify (args !! 2) (VectorTy elty) ls
           pure (s1 <> s2 <> s3 <> s3 <> s4, VectorTy elty, PrimAppE pr args_tc)
@@ -425,7 +426,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         InplaceVUpdateP elty -> do
           len3
           let [ls,i,val] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy elty) ls
+          s2 <- unify (head args) (VectorTy elty) ls
           s3 <- unify (args !! 1) IntTy i
           s4 <- unify (args !! 2) elty val
           pure (s1 <> s2 <> s3 <> s4, VectorTy elty, PrimAppE pr args_tc)
@@ -433,7 +434,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         VConcatP elty -> do
           len1
           let [ls] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy (VectorTy elty)) ls
+          s2 <- unify (head args) (VectorTy (VectorTy elty)) ls
           pure (s1 <> s2, VectorTy elty, PrimAppE pr args_tc)
 
         -- Given that the first argument is a list of type (VectorTy t),
@@ -444,7 +445,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         VSortP elty -> do
           len2
           let [ls,fp] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy elty) ls
+          s2 <- unify (head args) (VectorTy elty) ls
           s3 <- unify (args !! 1) (ArrowTy [elty, elty] IntTy) fp
           pure (s1 <> s2 <> s3, VectorTy elty, PrimAppE pr args_tc)
 
@@ -458,14 +459,14 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         VMergeP elty -> do
           len2
           let [ls1,ls2] = arg_tys'
-          s2 <- unify (args !! 0) (VectorTy elty) ls1
+          s2 <- unify (head args) (VectorTy elty) ls1
           s3 <- unify (args !! 1) (VectorTy elty) ls2
           pure (s1 <> s2 <> s3, VectorTy elty, PrimAppE pr args_tc)
 
         PDictInsertP kty vty -> do
           len3
           let [key, val, dict] = arg_tys'
-          s2 <- unify (args !! 0) key kty
+          s2 <- unify (head args) key kty
           s3 <- unify (args !! 1) val vty
           s4 <- unify (args !! 2) dict (PDictTy kty vty)
           pure (s1 <> s2 <> s3 <> s4, PDictTy kty vty, PrimAppE pr args_tc)
@@ -473,7 +474,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         PDictLookupP kty vty -> do
           len2
           let [key, dict] = arg_tys'
-          s2 <- unify (args !! 0) key kty
+          s2 <- unify (head args) key kty
           s3 <- unify (args !! 1) dict (PDictTy kty vty)
           pure (s1 <> s2 <> s3, vty, PrimAppE pr args_tc)
 
@@ -484,20 +485,20 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         PDictHasKeyP kty vty -> do
           len2
           let [key, dict] = arg_tys'
-          s2 <- unify (args !! 0) key kty
+          s2 <- unify (head args) key kty
           s3 <- unify (args !! 1) dict (PDictTy kty vty)
           pure (s1 <> s2 <> s3, BoolTy, PrimAppE pr args_tc)
 
         PDictForkP kty vty -> do
           len1
           let [dict] = arg_tys'
-          s2 <- unify (args !! 0) dict (PDictTy kty vty)
+          s2 <- unify (head args) dict (PDictTy kty vty)
           pure (s1 <> s2, ProdTy [PDictTy kty vty, PDictTy kty vty], PrimAppE pr args_tc)
 
         PDictJoinP kty vty -> do
           len2
           let [dict1, dict2] = arg_tys'
-          s2 <- unify (args !! 0) dict1 (PDictTy kty vty)
+          s2 <- unify (head args) dict1 (PDictTy kty vty)
           s3 <- unify (args !! 1) dict2 (PDictTy kty vty)
           pure (s1 <> s2 <> s3, PDictTy kty vty, PrimAppE pr args_tc)
 
@@ -508,44 +509,44 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         LLIsEmptyP elty -> do
           len1
           let [ll] = arg_tys
-          s2 <- unify (args !! 0) ll (ListTy elty)
+          s2 <- unify (head args) ll (ListTy elty)
           pure (s1 <> s2, BoolTy, PrimAppE pr args_tc)
 
         LLConsP elty -> do
           len2
           let [elt, ll] = arg_tys
-          s2 <- unify (args !! 0) elt elty
+          s2 <- unify (head args) elt elty
           s3 <- unify (args !! 1) ll (ListTy elty)
           pure (s1 <> s2 <> s3, ListTy elty, PrimAppE pr args_tc)
 
         LLHeadP elty -> do
           len1
           let [ll] = arg_tys
-          s2 <- unify (args !! 0) ll (ListTy elty)
+          s2 <- unify (head args) ll (ListTy elty)
           pure (s1 <> s2, elty, PrimAppE pr args_tc)
 
         LLTailP elty -> do
           len1
           let [ll] = arg_tys
-          s2 <- unify (args !! 0) ll (ListTy elty)
+          s2 <- unify (head args) ll (ListTy elty)
           pure (s1 <> s2, ListTy elty, PrimAppE pr args_tc)
 
         LLFreeP elty -> do
           len1
           let [i] = arg_tys'
-          s2 <- unify (args !! 0) (ListTy elty) i
+          s2 <- unify (head args) (ListTy elty) i
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         LLFree2P elty -> do
           len1
           let [i] = arg_tys'
-          s2 <- unify (args !! 0) (ListTy elty) i
+          s2 <- unify (head args) (ListTy elty) i
           pure (s1 <> s2, ProdTy [], PrimAppE pr args_tc)
 
         LLCopyP elty -> do
           len1
           let [i] = arg_tys'
-          s2 <- unify (args !! 0) (ListTy elty) i
+          s2 <- unify (head args) (ListTy elty) i
           pure (s1 <> s2, ListTy elty, PrimAppE pr args_tc)
 
         GetNumProcessors -> do
@@ -564,7 +565,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
           len2
           let [ity, _ety] = arg_tys'
           -- s1 <- unify (args !! 0) (PackedTy)
-          s2 <- unify (args !! 0) IntTy ity
+          s2 <- unify (head args) IntTy ity
           pure (s1 <> s2, BoolTy, PrimAppE pr args_tc)
 
         ReadPackedFile _fp _tycon _reg ty -> do
@@ -578,7 +579,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         WritePackedFile fp ty -> do
              len1
              let [packed_ty] = arg_tys'
-             s2 <- unify (args !! 0) ty packed_ty
+             s2 <- unify (head args) ty packed_ty
              pure (s1 <> s2, ProdTy [], PrimAppE (WritePackedFile fp (zonkTy s2 ty)) args_tc)
 
         Write3dPpmFile{} -> err $ text "Write3dPpmFile"
@@ -599,7 +600,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
       pure (s5, bod_ty,
             LetE (v, [], zonkTy s4 gvn_rhs_ty, zonkExp s4 rhs_tc) (zonkExp s5 bod_tc))
 
-    LetE (_, (_:_), _, _) _ -> err $ text "Unexpected LetE: " <+> exp_doc
+    LetE (_, _:_, _, _) _ -> err $ text "Unexpected LetE: " <+> exp_doc
 
     IfE a b c -> do
       (s1, t1, a_tc) <- go a
@@ -630,11 +631,11 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
         (PackedTy tycon drvd_tyargs) -> do
           let ddf = lookupDDef ddefs tycon
           ddf' <- substTyVarDDef ddf drvd_tyargs
-          brs' <- L.nubBy ((==) `on` fst3) . concat <$> traverse (\x@(a,_,c) -> 
-              if a == "_default" 
+          brs' <- L.nubBy ((==) `on` fst3) . concat <$> traverse (\x@(a,_,c) ->
+              if a == "_default"
                 then traverse (\(a', args) -> do
                         args' <- traverse (bitraverse (\_ -> gensym "wildcard") pure) args
-                        pure (a', args', c) 
+                        pure (a', args', c)
                       ) (dataCons ddf)
                 else pure [x]
             ) brs :: TcM [(DataCon, [(Var, Ty0)], Exp0)]
@@ -674,7 +675,7 @@ tcExp ddefs sbst venv fenv bound_tyvars is_main ex = (\(a,b,c) -> (a,b,c)) <$>
                                args
       (s4, bod_ty, bod_tc) <- tcExp ddefs s3 venv' fenv bound_tyvars is_main bod
       return (s4, zonkTy s4 (ArrowTy freshs bod_ty),
-              Ext (LambdaE (map (\(v,ty) -> (v, zonkTy s4 ty)) args) (zonkExp s4 bod_tc)))
+              Ext (LambdaE (map (second (zonkTy s4)) args) (zonkExp s4 bod_tc)))
     Ext (PolyAppE{}) -> err $ text "TODO" <+> exp_doc
 
     Ext (FunRefE tyapps f) -> do
@@ -754,7 +755,7 @@ tcCases ddefs sbst venv fenv bound_tyvars ddf brs is_main ex = do
         let vars = map fst vtys
             tys  = lookupDataCon' ddf con
             tys_gen = map (ForAll (tyArgs ddf L.\\ bound_tyvars)) tys
-            venv' = venv <> (M.fromList $ zip vars tys_gen)
+            venv' = venv <> M.fromList (zip vars tys_gen)
             vtys' = zip vars tys
         (s', rhs_ty, rhs_tc) <- tcExp ddefs s venv' fenv bound_tyvars is_main rhs
         let rhs_ty' = zonkTy s' rhs_ty
@@ -766,7 +767,7 @@ tcCases ddefs sbst venv fenv bound_tyvars ddf brs is_main ex = do
   s2 <- unifyl ex as bs
   let s3 = s1 <> s2
       tys' = map (zonkTy s3) tys
-  mapM_ (\(a,b) -> ensureEqualTy ex a b) (pairs tys')
+  mapM_ (uncurry (ensureEqualTy ex)) (pairs tys')
   pure (s3, head tys',exps)
   where
     -- pairs [1,2,3,4,5] = [(1,2), (2,3) (4,5)]
@@ -794,7 +795,7 @@ generalize env s bound_tyvars ty = do
       ty' = zonkTy (s <> s2) ty
 
       -- Generalize over BoundTv's too.
-      free_tvs = (tyVarsInTy ty) L.\\ bound_tyvars
+      free_tvs = tyVarsInTy ty L.\\ bound_tyvars
   pure (s <> s2, ForAll (new_bndrs ++ free_tvs) ty')
   where
     env_tvs = metaTvsInTySchemes (M.elems env)
@@ -876,7 +877,7 @@ combine v1 v2 | v1 == v2 = v1
 
 
 emptySubst :: Subst
-emptySubst = Subst (M.empty)
+emptySubst = Subst M.empty
 
 -- | Perform substitutions in the type.
 zonkTy :: Subst -> Ty0 -> Ty0
@@ -910,7 +911,7 @@ zonkTyScheme :: Subst -> TyScheme -> TyScheme
 zonkTyScheme s (ForAll tvs ty) = ForAll tvs (zonkTy s ty)
 
 zonkTyEnv :: Subst -> Gamma -> Gamma
-zonkTyEnv s env = M.map (zonkTyScheme s) env
+zonkTyEnv s = M.map (zonkTyScheme s)
 
 -- Apply a substitution to an expression i.e substitue all types in it.
 zonkExp :: Subst -> Exp0 -> Exp0
@@ -969,7 +970,7 @@ zonkExp s ex =
     DataConE{} -> error $ "zonkExp: Expected (ProdTy tyapps), got: " ++ sdoc ex
     TimeIt e ty b -> TimeIt (go e) (zonkTy s ty) b
     WithArenaE v e -> WithArenaE v (go e)
-    Ext (LambdaE args bod) -> Ext (LambdaE (map (\(v,ty) -> (v, zonkTy s ty)) args) (go bod))
+    Ext (LambdaE args bod) -> Ext (LambdaE (map (second (zonkTy s)) args) (go bod))
     Ext (PolyAppE rator rand) -> Ext (PolyAppE (go rator) (go rand))
     Ext (FunRefE tyapps f)    -> let tyapps1 = map (zonkTy s) tyapps
                                  in Ext (FunRefE tyapps1 f)
@@ -1034,7 +1035,7 @@ substTyVarExp s ex =
       DataConE (ProdTy (map (substTyVar s) tyapps)) dcon (map go args)
     DataConE{} -> error $ "substTyVarExp: Expected (ProdTy tyapps), got: " ++ sdoc ex
     TimeIt e ty b -> TimeIt (go e) (substTyVar s ty) b
-    Ext (LambdaE args bod) -> Ext (LambdaE (map (\(v,ty) -> (v, substTyVar s ty)) args) (go bod))
+    Ext (LambdaE args bod) -> Ext (LambdaE (map (second (substTyVar s)) args) (go bod))
     Ext (PolyAppE rator rand) -> Ext (PolyAppE (go rator) (go rand))
     Ext (FunRefE tyapps f) -> let tyapps1 = map (substTyVar s) tyapps
                               in Ext $ FunRefE tyapps1 f
@@ -1087,58 +1088,54 @@ substTyVarPrim mp pr =
 
 
 tyVarToMetaTyl :: [Ty0] -> TcM (M.Map TyVar Ty0, [Ty0])
-tyVarToMetaTyl tys =
-  foldlM
+tyVarToMetaTyl = foldlM
     (\(env', acc) ty -> do
             (env'', ty') <- tyVarToMetaTy ty
             pure (env' <> env'', acc ++ [ty']))
     (M.empty, [])
-    tys
 
 -- | Replace the specified quantified type variables by
 -- given meta type variables.
 tyVarToMetaTy :: Ty0 -> TcM (M.Map TyVar Ty0, Ty0)
-tyVarToMetaTy = go M.empty
-  where
-    go :: M.Map TyVar Ty0 -> Ty0 -> TcM (M.Map TyVar Ty0, Ty0)
-    go env ty =
-     case ty of
-       IntTy    -> pure (env, ty)
-       CharTy   -> pure (env, ty)
-       FloatTy  -> pure (env, ty)
-       SymTy0   -> pure (env, ty)
-       BoolTy   -> pure (env, ty)
-       TyVar v  -> do mty <- newMetaTy
-                      pure (M.insert v mty env, mty)
-       MetaTv{} -> pure (env, ty)
-       ProdTy tys -> do (env', tys') <- gol env tys
-                        pure (env', ProdTy tys')
-       SymDictTy v t -> do (env', t') <- go env t
-                           pure (env', SymDictTy v t')
-       PDictTy k v -> do (env', k') <- go env k
-                         (env'', v') <- go env' v
-                         pure (env'', PDictTy k' v')
-       ArrowTy as b -> do (env', as') <- gol env as
-                          (env'', b') <- go env' b
-                          pure (env'', ArrowTy as' b')
-       PackedTy t tys -> do (env', tys') <- gol env tys
-                            pure (env', PackedTy t tys')
-       VectorTy el_t -> do (env', el_t') <- go env el_t
-                           pure (env', VectorTy el_t')
-       ListTy el_t -> do (env', el_t') <- go env el_t
-                         pure (env', ListTy el_t')
-       ArenaTy  -> pure (env, ty)
-       SymSetTy -> pure (env, ty)
-       SymHashTy-> pure (env, ty)
-       IntHashTy-> pure (env, ty)
+tyVarToMetaTy = goTop M.empty
 
-    gol :: M.Map TyVar Ty0 -> [Ty0] -> TcM (M.Map TyVar Ty0, [Ty0])
-    gol env tys = foldlM
-                     (\(env', acc) ty -> do
-                         (env'', ty') <- go env' ty
-                         pure (env'', acc ++ [ty']))
-                     (env, [])
-                     tys
+gol env = foldlM (\(env', acc) ty -> do
+                     (env'', ty') <- goTop env' ty
+                     pure (env'', acc ++ [ty'])) (env, [])
+
+goTop :: M.Map TyVar Ty0 -> Ty0 -> TcM (M.Map TyVar Ty0, Ty0)
+goTop env ty =
+ case ty of
+   IntTy    -> pure (env, ty)
+   CharTy   -> pure (env, ty)
+   FloatTy  -> pure (env, ty)
+   SymTy0   -> pure (env, ty)
+   BoolTy   -> pure (env, ty)
+   TyVar v  -> do mty <- newMetaTy
+                  pure (M.insert v mty env, mty)
+   MetaTv{} -> pure (env, ty)
+   ProdTy tys -> do (env', tys') <- gol env tys
+                    pure (env', ProdTy tys')
+   SymDictTy v t -> do (env', t') <- goTop env t
+                       pure (env', SymDictTy v t')
+   PDictTy k v -> do (env', k') <- goTop env k
+                     (env'', v') <- goTop env' v
+                     pure (env'', PDictTy k' v')
+   ArrowTy as b -> do (env', as') <- gol env as
+                      (env'', b') <- goTop env' b
+                      pure (env'', ArrowTy as' b')
+   PackedTy t tys -> do (env', tys') <- gol env tys
+                        pure (env', PackedTy t tys')
+   VectorTy el_t -> do (env', el_t') <- goTop env el_t
+                       pure (env', VectorTy el_t')
+   ListTy el_t -> do (env', el_t') <- goTop env el_t
+                     pure (env', ListTy el_t')
+   ArenaTy  -> pure (env, ty)
+   SymSetTy -> pure (env, ty)
+   SymHashTy-> pure (env, ty)
+   IntHashTy-> pure (env, ty)
+
+gol :: M.Map TyVar Ty0 -> [Ty0] -> TcM (M.Map TyVar Ty0, [Ty0])
 
 --------------------------------------------------------------------------------
 -- Unification

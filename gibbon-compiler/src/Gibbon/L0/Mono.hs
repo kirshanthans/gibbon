@@ -56,37 +56,33 @@ isPolyDef pd@(PDDef n ds) =
 filterAndMono :: [(DataCon,[(IsBoxed,TyScheme Ty0)])] -> [(DataCon,[(IsBoxed,Ty0)])]
 filterAndMono ds =
   L.foldr mono [] $ L.filter isMono ds
-  where mono = (\ d acc ->
-                  case d of
-                    (c,s) -> ((c,s'):acc)
-                      where s' = L.map (\(i, ForAll _ t) -> (i,t)) s)
-        isMono = (\ d -> case d of
-                          (_, s) -> L.foldr emptyTyScheme True s)
-        emptyTyScheme = (\ (_, ForAll vs _) acc -> if vs == [] then acc else False)
+  where
+    mono d acc = case d of
+      (c,s) -> (c,s'):acc
+        where s' = L.map (\(i, ForAll _ t) -> (i,t)) s
+    isMono = L.foldr emptyTyScheme True . snd
+    emptyTyScheme (_, ForAll vs _) acc = null vs && acc
 
 filterPDefs :: PDDefs Ty0 -> (PDDefs Ty0, DDefs Ty0)
-filterPDefs pds = M.foldr (\ pd (acc1,acc2) ->
+filterPDefs = M.foldr (\ pd (acc1,acc2) ->
                              case isPolyDef pd of
                                Left  y -> (M.insert (dName y) y acc1, acc2)
                                Right n -> (acc1, M.insert (tyName n) n acc2))
                   (M.empty, M.empty)
-                  pds
 
 filterPFDefs :: PFDefs Ty0 Exp -> (PFDefs Ty0 Exp, FunDefs0)
-filterPFDefs pfds = M.foldr (\ pd (acc1,acc2) ->
+filterPFDefs = M.foldr (\ pd (acc1,acc2) ->
                              case isPolyFun pd of
                                Left  y -> (M.insert (fName y) y acc1,acc2)
                                Right n -> (acc1, M.insert (funName n) n acc2))
                   (M.empty, M.empty)
-                  pfds
 
 filterPVDefs :: PVDefs Ty0 Exp -> (PVDefs Ty0 Exp, VarDefs Ty0 Exp)
-filterPVDefs pfds = M.foldr (\ pv (acc1,acc2) ->
+filterPVDefs = M.foldr (\ pv (acc1,acc2) ->
                              case isPolyVar pv of
                                Left  y -> (M.insert (vName y) y acc1,acc2)
                                Right n -> (acc1, M.insert (varName n) n acc2))
                   (M.empty, M.empty)
-                  pfds
 
 updatePF :: PolyFD -> (Ty0 , Ty0) -> MonoFD
 updatePF (PFDef name arg _ b)  (t0, t1) =
@@ -111,10 +107,10 @@ traverseAndCopy (PProg ds fs vs main) =
         (pvs, _)   = filterPVDefs vs
 
         (lfs, defns1)  = runState (mapM (tACFunDef pfs pvs pds . snd) (M.toList fs)) M.empty
-        fds = M.fromList $ L.map (\ f -> ((fName f) , f)) lfs
+        fds = M.fromList $ L.map (\ f -> (fName f , f)) lfs
         (pfs', mfs) = filterPFDefs fds
         (lvs, defns2)  = runState (mapM (tACVarDef pfs' pvs pds . snd) (M.toList vs)) defns1
-        vds = M.fromList $ L.map (\ v -> ((vName v) , v)) lvs
+        vds = M.fromList $ L.map (\ v -> (vName v , v)) lvs
         (pvs', mvs) = filterPVDefs vds
         (main', defns) =
           case main of
@@ -182,8 +178,8 @@ tACExp pfs pvs pds (L loc e) = L loc <$>
     ProjE i x  -> ProjE i <$> go x
     IfE p t f -> IfE <$> go p <*> go t <*> go f
     CaseE k ls -> CaseE <$> go k <*> mapM f ls
-      where f = \ (dc,v,ex) -> (dc,v,) <$> go ex
-    LetE (v,lc,ty,rhs) b -> LetE <$> (v,lc,ty,) <$> go rhs <*> go b
+      where f (dc,v,ex) = (dc,v,) <$> go ex
+    LetE (v,lc,ty,rhs) b -> LetE . (v,lc,ty,) <$> go rhs <*> go b
     TimeIt x t b -> do
       x' <- go x
       return $ TimeIt x' t b
@@ -193,7 +189,7 @@ tACExp pfs pvs pds (L loc e) = L loc <$>
           f' <- go f
           d' <- go d
           return $ Ext $ PolyAppE f' d'
-        LambdaE x b  -> Ext <$> LambdaE x <$> go b
+        LambdaE x b  -> Ext . LambdaE x <$> go b
     _ -> return e
   where go = tACExp pfs pvs pds
         updatePolyF :: Exp -> Var -> State Defns Exp
@@ -204,7 +200,7 @@ tACExp pfs pvs pds (L loc e) = L loc <$>
               d' <- go d
               f' <- updatePolyF f v
               return $ Ext (PolyAppE f' d')
-            err -> return $ err
+            err -> return err
 
 -- Helpers
 
@@ -222,7 +218,7 @@ funCall (L loc ex) =
   case ex of
     Ext (PolyAppE (L _ (VarE v)) _) -> L loc $ VarE v
     Ext (PolyAppE f _) -> funCall f
-    e                  -> L loc $ e
+    e                  -> L loc e
 
 var :: Exp -> Var
 var (L _ (VarE v)) = v
@@ -244,7 +240,7 @@ replaceName old new (L loc b) = L loc $
     ProjE i x  -> ProjE i $ go x
     IfE p t f -> IfE (go p) (go t) (go f)
     CaseE k ls -> CaseE (go k) $ L.map f ls
-      where f = \ (dc,v,ex) -> (dc,v, go ex)
+      where f (dc,v,ex) = (dc,v, go ex)
     LetE (v,lc,ty,rhs) bd -> LetE (v,lc,ty,go rhs) $ go bd
     TimeIt x t e -> TimeIt (go x) t e
     Ext ext ->

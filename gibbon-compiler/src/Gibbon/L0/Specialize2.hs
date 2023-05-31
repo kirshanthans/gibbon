@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 {- L0 Specializer (part 2):
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -133,7 +134,7 @@ toL1 Prog{ddefs, fundefs, mainExp} =
 
     toL1DDef :: DDef0 -> L1.DDef1
     toL1DDef ddf@DDef{dataCons} =
-      ddf { dataCons = map (\(dcon, btys) -> (dcon, map (\(a,b) -> (a, toL1Ty b)) btys)) dataCons }
+      ddf { dataCons = map (second (map (second toL1Ty))) dataCons }
 
     toL1FunDef :: FunDef0 -> L1.FunDef1
     toL1FunDef fn@FunDef{funTy, funBody} =
@@ -215,7 +216,7 @@ toL1 Prog{ddefs, fundefs, mainExp} =
         SymDictTy Nothing  a -> L1.SymDictTy Nothing $ toL1Ty a
         PDictTy k v -> L1.PDictTy (toL1Ty k) (toL1Ty v)
         ArrowTy{} -> err2 (sdoc ty)
-        PackedTy tycon tyapps | tyapps == [] -> L1.PackedTy tycon ()
+        PackedTy tycon tyapps | null tyapps -> L1.PackedTy tycon ()
                               | otherwise    -> err1 (sdoc ty)
         ArenaTy -> L1.ArenaTy
         SymSetTy -> L1.SymSetTy
@@ -226,7 +227,7 @@ toL1 Prog{ddefs, fundefs, mainExp} =
 
     toL1TyS :: ArrowTy Ty0 -> ArrowTy L1.Ty1
     toL1TyS t@(ForAll tyvars (ArrowTy as b))
-      | tyvars == [] = (map toL1Ty as, toL1Ty b)
+      | null tyvars = (map toL1Ty as, toL1Ty b)
       | otherwise    = err1 (sdoc t)
     toL1TyS (ForAll _ t) = error $ "toL1: Not a function type: " ++ sdoc t
 
@@ -268,7 +269,7 @@ extendDatacons k v mono_st@MonoState{mono_dcons} =
 --
 -- getLambdaObls id { mono_lams = [ ((id,[IntTy]), id1), ((id,[BoolTy]), id2) ] }
 --   = [ (id2, [IntTy]), (id2, [BoolTy]) ]
-getLambdaObls :: Var -> MonoState -> (M.Map Var [Ty0])
+getLambdaObls :: Var -> MonoState -> M.Map Var [Ty0]
 getLambdaObls f MonoState{mono_lams} =
   M.fromList $ map (\((_,tys), w) -> (w, tys)) f_mono_st
   where
@@ -413,47 +414,46 @@ assertSameLength msg as bs =
 
 
 monoOblsTy :: DDefs0 -> Ty0 -> MonoM Ty0
-monoOblsTy ddefs1 t = do
-  case t of
-    CharTy    -> pure t
-    IntTy     -> pure t
-    FloatTy   -> pure t
-    SymTy0    -> pure t
-    BoolTy    -> pure t
-    TyVar{}   -> pure t
-    MetaTv{}  -> pure t
-    ProdTy ls -> ProdTy <$> mapM (monoOblsTy ddefs1) ls
-    SymDictTy{}  -> pure t
-    PDictTy{} -> pure t
-    ArrowTy as b -> do
-      as' <- mapM (monoOblsTy ddefs1) as
-      b' <- monoOblsTy ddefs1 b
-      pure $ ArrowTy as' b'
-    PackedTy tycon tyapps ->
-      case tyapps of
-        [] -> pure t
-        -- We're only looking for fully monomorphized datatypes here
-        _  -> case tyVarsInTys tyapps of
-                [] -> do
-                  tyapps' <- mapM (monoOblsTy ddefs1) tyapps
-                  mono_st <- get
-                  case M.lookup (tycon, tyapps') (mono_dcons mono_st) of
-                    Nothing -> do
-                      let DDef{tyArgs} = lookupDDef ddefs1 tycon
-                      assertSameLength ("In the type: " ++ sdoc t) tyArgs tyapps'
-                      suffix <- lift $ gensym "_v"
-                      let mono_st' = extendDatacons (tycon, tyapps') suffix mono_st
-                          tycon' = tycon ++ (fromVar suffix)
-                      put mono_st'
-                      pure $ PackedTy tycon' []
-                    Just suffix -> pure $ PackedTy (tycon ++ (fromVar suffix)) []
-                _  -> pure t
-    VectorTy{} -> pure t
-    ListTy{} -> pure t
-    ArenaTy  -> pure t
-    SymSetTy -> pure t
-    SymHashTy-> pure t
-    IntHashTy-> pure t
+monoOblsTy ddefs1 t = case t of
+                        CharTy    -> pure t
+                        IntTy     -> pure t
+                        FloatTy   -> pure t
+                        SymTy0    -> pure t
+                        BoolTy    -> pure t
+                        TyVar{}   -> pure t
+                        MetaTv{}  -> pure t
+                        ProdTy ls -> ProdTy <$> mapM (monoOblsTy ddefs1) ls
+                        SymDictTy{}  -> pure t
+                        PDictTy{} -> pure t
+                        ArrowTy as b -> do
+                          as' <- mapM (monoOblsTy ddefs1) as
+                          b' <- monoOblsTy ddefs1 b
+                          pure $ ArrowTy as' b'
+                        PackedTy tycon tyapps ->
+                          case tyapps of
+                            [] -> pure t
+                            -- We're only looking for fully monomorphized datatypes here
+                            _  -> case tyVarsInTys tyapps of
+                                    [] -> do
+                                      tyapps' <- mapM (monoOblsTy ddefs1) tyapps
+                                      mono_st <- get
+                                      case M.lookup (tycon, tyapps') (mono_dcons mono_st) of
+                                        Nothing -> do
+                                          let DDef{tyArgs} = lookupDDef ddefs1 tycon
+                                          assertSameLength ("In the type: " ++ sdoc t) tyArgs tyapps'
+                                          suffix <- lift $ gensym "_v"
+                                          let mono_st' = extendDatacons (tycon, tyapps') suffix mono_st
+                                              tycon' = tycon ++ fromVar suffix
+                                          put mono_st'
+                                          pure $ PackedTy tycon' []
+                                        Just suffix -> pure $ PackedTy (tycon ++ fromVar suffix) []
+                                    _  -> pure t
+                        VectorTy{} -> pure t
+                        ListTy{} -> pure t
+                        ArenaTy  -> pure t
+                        SymSetTy -> pure t
+                        SymHashTy-> pure t
+                        IntHashTy-> pure t
 
 
 -- | Collect monomorphization obligations.
@@ -469,7 +469,7 @@ collectMonoObls ddefs env2 toplevel ex =
       f' <- addFnObl f tyapps'
       pure $ AppE f' [] args'
     LetE (v, [], ty@ArrowTy{}, rhs) bod ->do
-      let env2' = (extendVEnv v ty env2)
+      let env2' = extendVEnv v ty env2
       case rhs of
         Ext (LambdaE{}) -> do
           rhs' <- go rhs
@@ -490,12 +490,12 @@ collectMonoObls ddefs env2 toplevel ex =
           pure $ LetE (v, [], ty, rhs') bod'
 
     LetE (v,[],ty,rhs) bod -> do
-      let env2' = (extendVEnv v ty env2)
+      let env2' = extendVEnv v ty env2
       rhs' <- go rhs
       bod' <- collectMonoObls ddefs env2' toplevel bod
       pure $ LetE (v,[],ty,rhs') bod'
 
-    LetE (_, (_:_), _, _) _ -> error $ "collectMonoObls: Let not monomorphized: " ++ sdoc ex
+    LetE (_, _:_, _, _) _ -> error $ "collectMonoObls: Let not monomorphized: " ++ sdoc ex
 
     CaseE scrt brs -> do
       case recoverType ddefs env2 scrt of
@@ -545,11 +545,11 @@ collectMonoObls ddefs env2 toplevel ex =
               assertSameLength ("In the expression: " ++ sdoc ex) tyArgs tyapps'
               suffix <- lift $ gensym "_v"
               let mono_st' = extendDatacons (tycon, tyapps) suffix mono_st
-                  dcon' = dcon ++ (fromVar suffix)
+                  dcon' = dcon ++ fromVar suffix
               put mono_st'
               pure $ DataConE (ProdTy []) dcon' args'
             Just suffix -> do
-              let dcon' = dcon ++ (fromVar suffix)
+              let dcon' = dcon ++ fromVar suffix
               pure $ DataConE (ProdTy []) dcon' args'
 
     DataConE{} -> error $ "collectMonoObls: DataConE expected ProdTy tyapps, got " ++ sdoc ex
@@ -665,21 +665,21 @@ monoLambdas ex =
       then do
         bod' <- go bod
         lam_bod' <- monoLambdas lam_bod
-        pure $ LetE (v, [], vty, (Ext (LambdaE args lam_bod'))) bod'
+        pure $ LetE (v, [], vty, Ext (LambdaE args lam_bod')) bod'
       -- Monomorphize and only bind those, drop the polymorphic defn.
       -- Also drop the obligation that we applied from MonoState.
       -- So after 'monoLambdas' is done, (mono_lams MonoState) should be [].
       else do
         -- new_lam_mono_st = old_lam_mono_st - applied_lam_mono_st
-        let new_lam_mono_st = (mono_lams mono_st) `M.difference`
-                              (M.fromList $ map (\(w,wtyapps) -> ((v,wtyapps), w)) (M.toList lam_mono_st))
+        let new_lam_mono_st = mono_lams mono_st `M.difference`
+                              M.fromList (map (\(w,wtyapps) -> ((v,wtyapps), w)) (M.toList lam_mono_st))
             mono_st' = mono_st { mono_lams =  new_lam_mono_st }
         put mono_st'
         bod' <- monoLambdas bod
         monomorphized <- monoLamBinds (M.toList lam_mono_st) (vty, rhs)
-        pure $ foldl (\acc bind -> LetE bind acc) bod' monomorphized
+        pure $ foldl (flip LetE) bod' monomorphized
 
-    LetE (_,(_:_),_,_) _ -> error $ "monoLambdas: Let not monomorphized: " ++ sdoc ex
+    LetE (_,_:_,_,_) _ -> error $ "monoLambdas: Let not monomorphized: " ++ sdoc ex
 
     -- Straightforward recursion
     VarE{}    -> pure ex
@@ -700,24 +700,24 @@ monoLambdas ex =
       pure $ LetE (v, [], ty, rhs') bod'
     IfE a b c  -> IfE <$> go a <*> go b <*> go c
     MkProdE ls -> MkProdE <$> mapM monoLambdas ls
-    ProjE i a  -> (ProjE i) <$> go a
+    ProjE i a  -> ProjE i <$> go a
     CaseE scrt brs -> do
       scrt' <- go scrt
       brs'  <- mapM (\(a,b,c) -> (a,b,) <$> go c) brs
       pure $ CaseE scrt' brs'
     DataConE tyapp dcon args ->
-      (DataConE tyapp dcon) <$> mapM monoLambdas args
+      DataConE tyapp dcon <$> mapM monoLambdas args
     TimeIt e ty b  -> (\e' -> TimeIt e' ty b) <$> go e
-    WithArenaE v e -> (\e' -> WithArenaE v e') <$> go e
+    WithArenaE v e -> WithArenaE v <$> go e
     Ext (LambdaE{})  -> error $ "monoLambdas: Encountered a LambdaE outside a let binding. In\n" ++ sdoc ex
     Ext (PolyAppE{}) -> error $ "monoLambdas: TODO: " ++ sdoc ex
     Ext (FunRefE{})  -> pure ex
     Ext (BenchE{})   -> pure ex
-    Ext (ParE0 ls)   -> Ext <$> ParE0 <$> mapM monoLambdas ls
-    Ext (PrintPacked ty arg)-> Ext <$> (PrintPacked ty) <$> monoLambdas arg
-    Ext (CopyPacked ty arg)-> Ext <$> (CopyPacked ty) <$> monoLambdas arg
-    Ext (TravPacked ty arg)-> Ext <$> (TravPacked ty) <$> monoLambdas arg
-    Ext (L p e)      -> Ext <$> (L p) <$> monoLambdas e
+    Ext (ParE0 ls)   -> Ext . ParE0 <$> mapM monoLambdas ls
+    Ext (PrintPacked ty arg)-> Ext . PrintPacked ty <$> monoLambdas arg
+    Ext (CopyPacked ty arg)-> Ext . CopyPacked ty <$> monoLambdas arg
+    Ext (TravPacked ty arg)-> Ext . TravPacked ty <$> monoLambdas arg
+    Ext (L p e)      -> Ext . L p <$> monoLambdas e
     Ext (LinearExt{}) -> error $ "monoLambdas: a linear types extension wasn't desugared: " ++ sdoc ex
     SpawnE f tyapps args ->
       case tyapps of
@@ -747,13 +747,13 @@ purgePolyFuns p@Prog{fundefs} =
   p { fundefs = M.filter isMonoFun fundefs }
 
 isMonoFun :: FunDef0 -> Bool
-isMonoFun FunDef{funTy} = (tyVarsFromScheme funTy) == []
+isMonoFun FunDef{funTy} = null (tyVarsFromScheme funTy)
 
 purgePolyDDefs :: Prog0 -> Prog0
 purgePolyDDefs p@Prog{ddefs} =
   p { ddefs = M.filter isMonoDDef ddefs }
   where
-    isMonoDDef DDef{tyArgs} = tyArgs == []
+    isMonoDDef DDef{tyArgs} = null tyArgs
 
 -- See Step (4) in the big note. Lot of code duplication :(
 updateTyCons :: MonoState -> Prog0 -> Prog0
@@ -805,7 +805,7 @@ updateTyConsExp ddefs mono_st ex =
     SyncE   -> SyncE
     MapE{}  -> error $ "updateTyConsExp: TODO: " ++ sdoc ex
     FoldE{} -> error $ "updateTyConsExp: TODO: " ++ sdoc ex
-    Ext (LambdaE args bod) -> Ext (LambdaE (map (\(v,ty) -> (v, updateTyConsTy ddefs mono_st ty)) args) (go bod))
+    Ext (LambdaE args bod) -> Ext (LambdaE (map (second (updateTyConsTy ddefs mono_st)) args) (go bod))
     Ext (PolyAppE a b) -> Ext (PolyAppE (go a) (go b))
     Ext (FunRefE{})    -> ex
     Ext (BenchE{})     -> ex
@@ -935,13 +935,13 @@ specLambdas prg@Prog{ddefs,fundefs,mainExp} = do
         fixpoint
 
     purgeHO :: FunDefs0 -> FunDefs0
-    purgeHO fns = M.filter isFOFun fns
+    purgeHO = M.filter isFOFun
 
     isFOFun :: FunDef0 -> Bool
     isFOFun FunDef{funTy} =
       let ForAll _ (ArrowTy arg_tys ret_ty) = funTy
       in all (null . arrowTysInTy) arg_tys &&
-         arrowTysInTy ret_ty == []
+        null (arrowTysInTy ret_ty)
 
 -- Eliminate all functions passed in as arguments to this function.
 specLambdasFun :: DDefs0 -> Var -> [FunRef] -> FunDef0 -> SpecM ()
@@ -980,7 +980,7 @@ specLambdasFun ddefs new_fn_name refs fn@FunDef{funArgs, funTy} = do
     do_spec :: [(Var,Var)] -> Exp0 -> Exp0
     do_spec lams e = foldr (uncurry subst') e lams
 
-    subst' old new ex = gRename (M.singleton old new) ex
+    subst' old new = gRename (M.singleton old new)
 
 specLambdasExp :: DDefs0 -> Env2 Ty0 -> Exp0 -> SpecM Exp0
 specLambdasExp ddefs env2 ex =
@@ -1006,7 +1006,7 @@ specLambdasExp ddefs env2 ex =
                                               Just extra -> extra ++ acc)
                                      [] refs
           let (vars,_) = unzip extra_args
-              args''' = args'' ++ (map VarE vars)
+              args''' = args'' ++ map VarE vars
           case (M.lookup (f,refs) (sp_funs_done sp_state), M.lookup (f,refs) (sp_funs_todo sp_state)) of
             (Nothing, Nothing) -> do
               f' <- lift $ gensym f
@@ -1029,13 +1029,13 @@ specLambdasExp ddefs env2 ex =
     AppE _ (_:_) _ -> error $ "specLambdasExp: Call-site not monomorphized: " ++ sdoc ex
 
     -- Float out a lambda fun to the top-level.
-    LetE (v, [], ty, (Ext (LambdaE args lam_bod))) bod -> do
+    LetE (v, [], ty, Ext (LambdaE args lam_bod)) bod -> do
       v' <- lift $ gensym v
       let bod' = gRename (M.singleton v v') bod
       sp_state <- get
       let arg_vars = map fst args
-          captured_vars = gFreeVars lam_bod `S.difference` (S.fromList arg_vars)
-                          `S.difference` (M.keysSet (sp_fundefs sp_state))
+          captured_vars = gFreeVars lam_bod `S.difference` S.fromList arg_vars
+                          `S.difference` M.keysSet (sp_fundefs sp_state)
       lam_bod' <- specLambdasExp ddefs (L1.extendsVEnv (M.fromList args) env2) lam_bod
       if not (S.null captured_vars)
       -- Pass captured values as extra arguments
@@ -1051,7 +1051,7 @@ specLambdasExp ddefs env2 ex =
                                               Nothing    -> acc
                                               Just extra -> extra ++ acc)
                                      [] fns
-            extra_args1 = (zip ls tys) ++ extra_args
+            extra_args1 = zip ls tys ++ extra_args
             (vars1,tys1) = unzip extra_args1
             ty' = addArgsToTy tys1 (ForAll [] ty)
             fn = FunDef { funName = v'
@@ -1092,12 +1092,12 @@ specLambdasExp ddefs env2 ex =
 
     LetE (v, [], ty, rhs) bod -> do
       let _fn_refs = collectFunRefs rhs []
-          env2' = (extendVEnv v ty env2)
+          env2' = extendVEnv v ty env2
       rhs' <- go rhs
       bod' <- specLambdasExp ddefs env2' bod
       pure $ LetE (v, [], ty, rhs') bod'
 
-    LetE (_, (_:_),_,_) _ -> error $ "specExp: Binding not monomorphized: " ++ sdoc ex
+    LetE (_, _:_,_,_) _ -> error $ "specExp: Binding not monomorphized: " ++ sdoc ex
 
     -- Straightforward recursion
     VarE{}    -> pure ex
@@ -1110,7 +1110,7 @@ specLambdasExp ddefs env2 ex =
       pure $ PrimAppE pr args'
     IfE a b c -> IfE <$> go a <*> go b <*> go c
     MkProdE ls -> MkProdE <$> mapM go ls
-    ProjE i a -> (ProjE i) <$> go a
+    ProjE i a -> ProjE i <$> go a
     CaseE scrt brs -> do
       scrt' <- go scrt
       brs' <- mapM
@@ -1119,7 +1119,7 @@ specLambdasExp ddefs env2 ex =
                   (dcon,vtys,) <$> specLambdasExp ddefs env2' rhs)
                 brs
       pure $ CaseE scrt' brs'
-    DataConE tyapp dcon args -> (DataConE tyapp dcon) <$> mapM go args
+    DataConE tyapp dcon args -> DataConE tyapp dcon <$> mapM go args
     TimeIt e ty b -> do
        e' <- go e
        pure $ TimeIt e' ty b
@@ -1141,10 +1141,10 @@ specLambdasExp ddefs env2 ex =
         FunRefE{}  -> pure ex
         BenchE{}   -> pure ex
         ParE0 ls -> do
-          let mk_fn :: Exp0 -> SpecM (Maybe FunDef0, [(Var, [Ty0], Ty0, (PreExp E0Ext Ty0 Ty0))], Exp0)
+          let mk_fn :: Exp0 -> SpecM (Maybe FunDef0, [(Var, [Ty0], Ty0, PreExp E0Ext Ty0 Ty0)], Exp0)
               mk_fn e0 = do
                 let vars = S.toList $ gFreeVars e0
-                args <- mapM (\v -> lift $ gensym v) vars
+                args <- mapM (lift . gensym) vars
                 let e0' = foldr (\(old,new) acc ->
                                   gSubst old (VarE new) acc)
                                 e0
@@ -1153,7 +1153,7 @@ specLambdasExp ddefs env2 ex =
                 fnname <- lift $ gensym "fn"
                 let binds  = map (\(v,w,ty) -> (v,[],ty,VarE w)) (zip3 args vars argtys)
                     retty  = recoverType ddefs env2 e0
-                    argtys = map (\v -> lookupVEnv v env2) vars
+                    argtys = map (`lookupVEnv` env2) vars
                     fn = FunDef { funName = fnname
                                 , funArgs = args
                                 , funTy   = ForAll [] (ArrowTy argtys retty)
@@ -1173,11 +1173,11 @@ specLambdasExp ddefs env2 ex =
                                          ls
           state (\st -> ((), st { sp_fundefs = foldr mb_insert (sp_fundefs st) mb_fns }))
           pure $ mkLets (concat binds) (Ext $ ParE0 calls)
-        PrintPacked ty arg -> Ext <$> (PrintPacked ty) <$> go arg
-        CopyPacked ty arg -> Ext <$> (CopyPacked ty) <$> go arg
-        TravPacked ty arg -> Ext <$> (TravPacked ty) <$> go arg
+        PrintPacked ty arg -> Ext . PrintPacked ty <$> go arg
+        CopyPacked ty arg -> Ext . CopyPacked ty <$> go arg
+        TravPacked ty arg -> Ext . TravPacked ty <$> go arg
         LinearExt{}  -> error $ "specLambdasExp: a linear types extension wasn't desugared: " ++ sdoc ex
-        L p e -> Ext <$> (L p) <$> go e
+        L p e -> Ext . L p <$> go e
   where
     go = specLambdasExp ddefs env2
 
@@ -1297,7 +1297,7 @@ bindLambdas :: Prog0 -> PassM Prog0
 bindLambdas prg@Prog{fundefs,mainExp} = do
   mainExp' <- case mainExp of
                 Nothing      -> pure Nothing
-                Just (a, ty) -> Just <$> (,ty) <$> goExp a
+                Just (a, ty) -> Just . (,ty) <$> goExp a
   fundefs' <- mapM
                 (\fn@FunDef{funBody} -> goExp funBody >>=
                                         \b' -> pure $ fn {funBody = b'})
@@ -1306,7 +1306,7 @@ bindLambdas prg@Prog{fundefs,mainExp} = do
              , mainExp = mainExp' }
   where
     goExp :: Exp0 -> PassM Exp0
-    goExp ex0 = gocap ex0
+    goExp = gocap
       where
       gocap ex = do (lets,ex') <- go ex
                     pure $ mkLets lets ex'
@@ -1350,7 +1350,7 @@ bindLambdas prg@Prog{fundefs,mainExp} = do
           (ltss,args') <- unzip <$> mapM go args
           pure (concat ltss, AppE f tyapps args')
         (MapE _ _)    -> error "bindLambdas: FINISHME MapE"
-        (FoldE _ _ _) -> error "bindLambdas: FINISHME FoldE"
+        (FoldE {}) -> error "bindLambdas: FINISHME FoldE"
         (LetE (v,tyapps,t,rhs) bod) -> do
            (lts1, rhs') <- go rhs
            bod' <- gocap bod
@@ -1372,9 +1372,9 @@ bindLambdas prg@Prog{fundefs,mainExp} = do
         (SpawnE f tyapps args) -> do
           (ltss,args') <- unzip <$> mapM go args
           pure (concat ltss, SpawnE f tyapps args')
-        (SyncE)    -> pure ([], SyncE)
+        SyncE    -> pure ([], SyncE)
         (WithArenaE v e) -> do
-          e' <- (gocap e)
+          e' <- gocap e
           pure ([], WithArenaE v e')
         (TimeIt e t b) -> do (lts,e') <- go e
                              pure (lts, TimeIt e' t b)
@@ -1389,7 +1389,7 @@ desugarL0 (Prog ddefs fundefs' mainExp') = do
   fundefs'' <- mapM (\fn@FunDef{funBody} -> go funBody >>= \b -> pure $ fn {funBody = b}) fundefs'
   mainExp'' <- case mainExp' of
                 Nothing     -> pure Nothing
-                Just (e,ty) -> Just <$> (,ty) <$> go e
+                Just (e,ty) -> Just . (,ty) <$> go e
   addRepairFns $ Prog ddefs'' fundefs'' mainExp''
   where
     err1 msg = error $ "desugarL0: " ++ msg
@@ -1432,14 +1432,14 @@ desugarL0 (Prog ddefs fundefs' mainExp') = do
                   _ -> args
           args'' <- mapM go args'
           pure $ PrimAppE pr args''
-        LetE (v,_tyapps,(ProdTy tys),(Ext (ParE0 ls))) bod -> do
+        LetE (v,_tyapps,ProdTy tys,Ext (ParE0 ls)) bod -> do
           vs <- mapM (\_ -> gensym "par_") ls
-          let xs = (zip3 vs tys ls)
+          let xs = zip3 vs tys ls
               spawns = init xs
               (a,b,c) = last xs
               ls' = foldr
-                      (\(w,ty1,(AppE fn tyapps1 args)) acc ->
-                         (w,[],ty1,(SpawnE fn tyapps1 args)) : acc)
+                      (\(w,ty1,AppE fn tyapps1 args) acc ->
+                         (w,[],ty1,SpawnE fn tyapps1 args) : acc)
                       []
                       spawns
               ls'' = ls' ++ [(a,[],b,c)]
@@ -1451,10 +1451,10 @@ desugarL0 (Prog ddefs fundefs' mainExp') = do
                            (zip ls''' [0..])
           bod'' <- go bod'
           pure $  mkLets binds bod''
-        LetE (v,tyapps,ty,rhs) bod -> LetE <$> (v,tyapps,ty,) <$> go rhs <*> go bod
+        LetE (v,tyapps,ty,rhs) bod -> LetE . (v,tyapps,ty,) <$> go rhs <*> go bod
         IfE a b c  -> IfE <$> go a <*> go b <*> go c
         MkProdE ls -> MkProdE <$> mapM go ls
-        ProjE i a  -> (ProjE i) <$> go a
+        ProjE i a  -> ProjE i <$> go a
         CaseE scrt brs -> do
           scrt' <- go scrt
           brs' <- mapM (\(dcon,vtys,bod) -> do
@@ -1500,13 +1500,12 @@ desugarL0 (Prog ddefs fundefs' mainExp') = do
                       (bnds', args') <- unzip <$> zipWithM flattenTupleArgs vs tys'
                       let bnds'' = (argalias,[],ty, arg):[(y,[],ty',ProjE i (VarE argalias))| (y, ty', i) <- zip3 ys tys' [0..]]
                       pure (bnds'' ++ concat bnds', concat args')
-                _ -> do
-                  pure ([], [arg])
+                _ -> pure ([], [arg])
           (binds, args) <- unzip <$> zipWithM flattenTupleArgs ls' tys
           pure $ mkLets (concat binds) $ DataConE a dcon (concat args)
         TimeIt e ty b    -> (\a -> TimeIt a ty b) <$> go e
-        WithArenaE v e -> (WithArenaE v) <$> go e
-        SpawnE fn tyapps args -> (SpawnE fn tyapps) <$> mapM go args
+        WithArenaE v e -> WithArenaE v <$> go e
+        SpawnE fn tyapps args -> SpawnE fn tyapps <$> mapM go args
         SyncE   -> pure SyncE
         MapE{}  -> err1 (sdoc ex)
         FoldE{} -> err1 (sdoc ex)
@@ -1532,7 +1531,7 @@ desugarL0 (Prog ddefs fundefs' mainExp') = do
                   let f = mkTravFunName tycon
                   pure $ AppE f [] [arg]
               | otherwise -> err1 $ "printPacked without a packed type. Got " ++ sdoc ty
-            L p e   -> Ext <$> (L p) <$> (go e)
+            L p e   -> Ext . L p <$> go e
             LinearExt{} -> err1 (sdoc ex)
 
 --------------------------------------------------------------------------------
@@ -1548,7 +1547,7 @@ addRepairFns (Prog dfs fds me) = do
                     print_fn <- genPrintFn d
                     return [copy_fn, copy2_fn, trav_fn, print_fn])
               (filter (not . isVoidDDef) (M.elems dfs))
-  let fds' = fds `M.union` (M.fromList $ map (\f -> (funName f, f)) newFns)
+  let fds' = fds `M.union` M.fromList (map (\f -> (funName f, f)) newFns)
   pure $ Prog dfs fds' me
 
 
@@ -1556,7 +1555,7 @@ addRepairFns (Prog dfs fds me) = do
 -- Note: there will be redundant let bindings in the function body which may need to be inlined.
 genCopyFn :: DDef0 -> PassM FunDef0
 genCopyFn DDef{tyName, dataCons} = do
-  arg <- gensym $ "arg"
+  arg <- gensym "arg"
   casebod <- forM dataCons $ \(dcon, dtys) ->
              do let tys = map snd dtys
                 xs <- mapM (\_ -> gensym "x") tys
@@ -1567,10 +1566,10 @@ genCopyFn DDef{tyName, dataCons} = do
                                        PackedTy tycon _ -> LetE (y, [], ty, AppE (mkCopyFunName tycon) [] [VarE x]) acc
                                        _ -> LetE (y, [], ty, VarE x) acc)
                             (DataConE (ProdTy []) dcon $ map VarE ys) (zip3 tys xs ys)
-                return (dcon, map (\x -> (x,(ProdTy []))) xs, bod)
+                return (dcon, map (, ProdTy []) xs, bod)
   return $ FunDef { funName = mkCopyFunName (fromVar tyName)
                   , funArgs = [arg]
-                  , funTy   = (ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (PackedTy (fromVar tyName) [])))
+                  , funTy   = ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (PackedTy (fromVar tyName) []))
                   , funBody = CaseE (VarE arg) casebod
                   , funMeta = FunMeta { funRec = Rec
                                       , funInline = NoInline
@@ -1580,7 +1579,7 @@ genCopyFn DDef{tyName, dataCons} = do
 
 genCopySansPtrsFn :: DDef0 -> PassM FunDef0
 genCopySansPtrsFn DDef{tyName,dataCons} = do
-  arg <- gensym $ "arg"
+  arg <- gensym "arg"
   casebod <- forM dataCons $ \(dcon, dtys) ->
              do let tys = map snd dtys
                 xs <- mapM (\_ -> gensym "x") tys
@@ -1591,10 +1590,10 @@ genCopySansPtrsFn DDef{tyName,dataCons} = do
                                        PackedTy tycon _ -> LetE (y, [], ty, AppE (mkCopySansPtrsFunName tycon) [] [VarE x]) acc
                                        _ -> LetE (y, [], ty, VarE x) acc)
                             (DataConE (ProdTy []) dcon $ map VarE ys) (zip3 tys xs ys)
-                return (dcon, map (\x -> (x,(ProdTy []))) xs, bod)
+                return (dcon, map (, ProdTy []) xs, bod)
   return $ FunDef { funName = mkCopySansPtrsFunName (fromVar tyName)
                   , funArgs = [arg]
-                  , funTy   = (ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (PackedTy (fromVar tyName) [])))
+                  , funTy   = ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (PackedTy (fromVar tyName) []))
                   , funBody = CaseE (VarE arg) casebod
                   , funMeta = FunMeta  { funRec = Rec
                                        , funInline = NoInline
@@ -1608,7 +1607,7 @@ genCopySansPtrsFn DDef{tyName,dataCons} = do
 -- | Traverses a packed data type.
 genTravFn :: DDef0 -> PassM FunDef0
 genTravFn DDef{tyName, dataCons} = do
-  arg <- gensym $ "arg"
+  arg <- gensym "arg"
   casebod <- forM dataCons $ \(dcon, tys) ->
              do xs <- mapM (\_ -> gensym "x") tys
                 ys <- mapM (\_ -> gensym "y") tys
@@ -1618,10 +1617,10 @@ genTravFn DDef{tyName, dataCons} = do
                                        _ -> acc)
                           (MkProdE [])
                           (zip3 (map snd tys) xs ys)
-                return (dcon, map (\x -> (x,ProdTy [])) xs, bod)
+                return (dcon, map (, ProdTy []) xs, bod)
   return $ FunDef { funName = mkTravFunName (fromVar tyName)
                   , funArgs = [arg]
-                  , funTy   = (ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (ProdTy [])))
+                  , funTy   = ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (ProdTy []))
                   , funBody = CaseE (VarE arg) casebod
                   , funMeta = FunMeta  { funRec = Rec
                                        , funInline = NoInline
@@ -1663,15 +1662,15 @@ genPrintFn DDef{tyName, dataCons} = do
                     add_spaces (z:zs) = do
                       zs' <- add_spaces zs
                       wi <- gensym "wildcard"
-                      pure $ z:(wi, [], ProdTy [], PrimAppE PrintSym [(LitSymE (toVar " "))] ):zs'
+                      pure $ z:(wi, [], ProdTy [], PrimAppE PrintSym [LitSymE (toVar " ")] ):zs'
 
-                bnds'' <- add_spaces $ [(w1, [], ProdTy [], PrimAppE PrintSym [(LitSymE (toVar ("(" ++ dcon)))])] ++ bnds
-                let bnds' = bnds'' ++ [(w2, [], ProdTy [], PrimAppE PrintSym [(LitSymE (toVar ")"))])]
+                bnds'' <- add_spaces $ (w1, [], ProdTy [], PrimAppE PrintSym [LitSymE (toVar ("(" ++ dcon))]) : bnds
+                let bnds' = bnds'' ++ [(w2, [], ProdTy [], PrimAppE PrintSym [LitSymE (toVar ")")])]
                     bod = mkLets bnds' (MkProdE [])
-                return (dcon, map (\x -> (x,ProdTy [])) xs, bod)
+                return (dcon, map (, ProdTy []) xs, bod)
   return $ FunDef { funName = mkPrinterName (fromVar tyName)
                   , funArgs = [arg]
-                  , funTy   = (ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (ProdTy [])))
+                  , funTy   = ForAll [] (ArrowTy [PackedTy (fromVar tyName) []] (ProdTy []))
                   , funBody = CaseE (VarE arg) casebod
                   , funMeta = FunMeta  { funRec = Rec
                                        , funInline = NoInline
@@ -1697,16 +1696,15 @@ floatOutCase (Prog ddefs fundefs mainExp) = do
                   let fn' = fn { funBody = funBody' }
                   state (\s -> ((), M.insert funName fn' s)))
             (M.elems fundefs)
-          float_main <- do
+          do
              fstate <- get
              let env2 = Env2 M.empty (initFunEnv fstate)
              case mainExp of
                Nothing -> pure Nothing
-               Just (e,ty) -> Just <$> (,ty) <$> go True env2 e
-          pure float_main
+               Just (e,ty) -> Just . (,ty) <$> go True env2 e
 
     (mainExp',state') <- runStateT float_m fundefs
-    pure $ (Prog ddefs state' mainExp')
+    pure (Prog ddefs state' mainExp')
   where
     err1 msg = error $ "floatOutCase: " ++ msg
 
@@ -1715,15 +1713,15 @@ floatOutCase (Prog ddefs fundefs mainExp) = do
       fundefs' <- get
       let fenv' = M.map funTy fundefs'
           env2' = env2 {fEnv = fenv'}
-          free = S.toList $ gFreeVars ex `S.difference` (M.keysSet fundefs')
-          in_tys = map (\x -> lookupVEnv x env2') free
+          free = S.toList $ gFreeVars ex `S.difference` M.keysSet fundefs'
+          in_tys = map (`lookupVEnv` env2') free
           ret_ty = recoverType ddefs env2' ex
           fn_ty = ForAll [] (ArrowTy in_tys ret_ty)
       fn_name <- lift $ gensym "caseFn"
-      args <- mapM (\x -> lift $ gensym x) free
+      args <- mapM (lift . gensym) free
       let ex' = foldr (\(from,to) acc -> gSubst from (VarE to) acc) ex (zip free args)
       let fn = FunDef fn_name args fn_ty ex' (FunMeta NotRec NoInline False)
-      state (\s -> ((AppE fn_name [] (map VarE free)), M.insert fn_name fn s))
+      state (\s -> (AppE fn_name [] (map VarE free), M.insert fn_name fn s))
 
     go :: Bool -> Env2 Ty0 -> Exp0 -> FloatM Exp0
     go float env2 ex =
@@ -1744,7 +1742,7 @@ floatOutCase (Prog ddefs fundefs mainExp) = do
           pure $ LetE (v,tyapps,ty,rhs') bod'
         IfE a b c  -> IfE <$> go True env2 a <*> go True env2 b <*> go True env2 c
         MkProdE ls -> MkProdE <$> mapM recur ls
-        ProjE i a  -> (ProjE i) <$> recur a
+        ProjE i a  -> ProjE i <$> recur a
         CaseE scrt brs -> do
           scrt' <- go float env2 scrt
           brs' <- mapM (\(dcon,vtys,rhs) -> do
@@ -1759,8 +1757,8 @@ floatOutCase (Prog ddefs fundefs mainExp) = do
           else pure $ CaseE scrt' brs'
         DataConE a dcon ls -> DataConE a dcon <$> mapM recur ls
         TimeIt e ty b    -> (\a -> TimeIt a ty b) <$> recur e
-        WithArenaE v e -> (WithArenaE v) <$> recur e
-        SpawnE fn tyapps args -> (SpawnE fn tyapps) <$> mapM recur args
+        WithArenaE v e -> WithArenaE v <$> recur e
+        SpawnE fn tyapps args -> SpawnE fn tyapps <$> mapM recur args
         SyncE   -> pure SyncE
         Ext{}   -> pure ex
         MapE{}  -> err1 (sdoc ex)
