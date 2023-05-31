@@ -7,7 +7,7 @@ module Gibbon.Passes.Freshen (freshNames, freshNames1, freshExp, freshExp1, fres
 
 import           Control.Exception
 import           Data.Foldable ( foldrM )
-import           Prelude hiding (exp)
+import           Prelude hiding ( exp )
 import qualified Data.List as L
 import qualified Data.Map as M
 
@@ -42,7 +42,7 @@ freshDDef DDef{tyName,tyArgs,dataCons} = do
     go msg bound env (b, ty) = do
       (_, ty') <- freshTy env ty
       let free_tvs = tyVarsInTy ty' L.\\ bound
-      if free_tvs == []
+      if null free_tvs
       then pure (b, ty')
       else error $ "freshDDef: Unbound type variables " ++ sdoc free_tvs
                    ++ " in the constructor:\n" ++ msg
@@ -50,7 +50,7 @@ freshDDef DDef{tyName,tyArgs,dataCons} = do
 freshFun :: FunDef Exp0 -> PassM (FunDef Exp0)
 freshFun (FunDef nam nargs funty bod meta) =
     do nargs' <- mapM gensym nargs
-       let msubst = (M.fromList $ zip nargs nargs')
+       let msubst = M.fromList $ zip nargs nargs'
        (tvenv, funty') <- freshTyScheme funty
        funty'' <- freshDictTyScheme msubst funty'
        bod' <- freshExp msubst tvenv bod
@@ -100,13 +100,11 @@ freshTy env ty =
      IntHashTy -> pure (env, ty)
 
 freshTys :: TyVarEnv (TyOf Exp0) -> [Ty0] -> PassM (TyVarEnv (TyOf Exp0), [Ty0])
-freshTys env tys =
-  foldrM
+freshTys env = foldrM
     (\t (env', acc) -> do
           (env'', t') <- freshTy env' t
           pure (env' <> env'', t' : acc))
     (env, [])
-    tys
 
 freshDictTy :: Monad m => M.Map Var Var -> Ty0 -> m Ty0
 freshDictTy m ty =
@@ -170,7 +168,7 @@ freshExp venv tvenv exp =
         Nothing -> return $ VarE (cleanFunName v)
         Just v' -> return $ VarE (cleanFunName v')
 
-    AppE v locs ls -> assert ([] == locs) $ do
+    AppE v locs ls -> assert (null locs) $ do
       ls' <- mapM go ls
       case M.lookup v venv of
         Nothing -> return $ AppE (cleanFunName v) [] ls'
@@ -239,7 +237,7 @@ freshExp venv tvenv exp =
       e' <- freshExp (M.insert v v' venv) tvenv e
       return $ WithArenaE v' e'
 
-    SpawnE v locs ls -> assert ([] == locs) $ do
+    SpawnE v locs ls -> assert (null locs) $ do
       ls' <- mapM go ls
       case M.lookup v venv of
         Nothing -> return $ SpawnE (cleanFunName v) [] ls'
@@ -270,7 +268,7 @@ freshExp venv tvenv exp =
                                      (_tvenv', t') <- freshTy tvenv t
                                      pure (acc1', v':acc2, t': acc3))
                                (venv,[],[]) args
-          Ext <$> (LambdaE (zip vs ts) <$> (freshExp venv' tvenv bod))
+          Ext <$> (LambdaE (zip vs ts) <$> freshExp venv' tvenv bod)
         FunRefE tyapps f ->
           case M.lookup f venv of
             Nothing -> pure $ Ext $ FunRefE tyapps (cleanFunName f)
@@ -281,8 +279,8 @@ freshExp venv tvenv exp =
           args' <- mapM go args
           pure $ Ext (BenchE (cleanFunName fn) tyapps args' b)
 
-        ParE0 ls -> Ext <$> ParE0 <$> mapM go ls
-        L p e    -> Ext <$> (L p) <$> go e
+        ParE0 ls -> Ext . ParE0 <$> mapM go ls
+        L p e    -> Ext . L p <$> go e
         PrintPacked ty arg -> do
           (tvenv', ty') <- freshTy tvenv ty
           arg' <- freshExp venv tvenv' arg
@@ -314,7 +312,7 @@ freshNames1 (L1.Prog defs funs main) =
 freshFun1 :: L1.FunDef1 -> PassM L1.FunDef1
 freshFun1 (FunDef nam nargs (targ,ty) bod meta) = do
     nargs' <- mapM gensym nargs
-    let msubst = (M.fromList $ zip nargs nargs')
+    let msubst = M.fromList $ zip nargs nargs'
     bod' <- freshExp1 msubst bod
     -- let nam' = cleanFunName nam
     return $ FunDef nam nargs' (targ,ty) bod' meta
@@ -333,7 +331,7 @@ freshExp1 vs exp =
         Nothing -> return $ VarE v
         Just v' -> return $ VarE v'
 
-    AppE v locs ls -> assert ([] == locs) $ do
+    AppE v locs ls -> assert (null locs) $ do
       ls' <- mapM (freshExp1 vs) ls
       case M.lookup v vs of
         Nothing -> return $ AppE (cleanFunName v) [] ls'
@@ -343,7 +341,7 @@ freshExp1 vs exp =
       es' <- mapM (freshExp1 vs) es
       return $ PrimAppE p es'
 
-    LetE (v,locs,t, e1) e2 -> assert ([]==locs) $ do
+    LetE (v,locs,t, e1) e2 -> assert (null locs) $ do
      e1' <- freshExp1 vs e1
      v'  <- gensym v
      e2' <- freshExp1 (M.insert v v' vs) e2
@@ -370,7 +368,7 @@ freshExp1 vs exp =
                    let (args,_) = unzip prs in
                    do
                      args' <- mapM gensym args
-                     let vs' = (M.fromList $ zip args args') `M.union` vs
+                     let vs' = M.fromList (zip args args') `M.union` vs
                      ae' <- freshExp1 vs' ae
                      return (c, map (,()) args', ae')) mp
       return $ CaseE e' mp'
@@ -383,7 +381,7 @@ freshExp1 vs exp =
       e' <- freshExp1 vs e
       return $ TimeIt e' t b
 
-    SpawnE v locs ls -> assert ([] == locs) $ do
+    SpawnE v locs ls -> assert (null locs) $ do
       ls' <- mapM (freshExp1 vs) ls
       case M.lookup v vs of
         Nothing -> return $ SpawnE (cleanFunName v) [] ls'

@@ -17,7 +17,7 @@ type FunEnv = TyEnv FunMeta
 
 inferFunAllocs :: Prog2 -> PassM Prog2
 inferFunAllocs prg@Prog{fundefs} = do
-  let finalMetas = fixpoint 1 fundefs (M.map funMeta fundefs)
+  let finalMetas = fixpoint 1 fundefs $ M.map funMeta fundefs
       funs = M.map (\fn@FunDef{funName} ->
                        fn { funMeta = finalMetas ! funName })
              fundefs
@@ -27,8 +27,14 @@ inferFunAllocs prg@Prog{fundefs} = do
     fixpoint iter funs fenv =
        let metas = M.map (inferFunDef fenv) funs
        in if fenv == metas
-          then dbgTrace lvl ("\n<== Fixpoint completed after iteration "++show iter++" ==>") $ fenv
-          else fixpoint (iter+1) funs metas
+          then 
+            let msg = mconcat 
+                  [ "\n", "<== Fixpoint completed after iteration", " "
+                  , show iter
+                  , "==>"
+                  ] in
+            dbgTrace lvl msg fenv
+          else fixpoint (iter + 1) funs metas
 
 inferFunDef :: FunEnv -> FunDef2 -> FunMeta
 inferFunDef fenv FunDef{funBody,funMeta} =
@@ -64,7 +70,7 @@ inferExp fenv expr =
     Ext (IndirectionE{})   -> False
     Ext (BoundsCheck{})    -> _todo -- (S.empty, Nothing)
     Ext (AddFixed{})       -> False
-    Ext (GetCilkWorkerNum) -> False
+    Ext GetCilkWorkerNum   -> False
     Ext (LetAvail _ e)     -> go e
   where
     go = inferExp fenv

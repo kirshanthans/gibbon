@@ -31,7 +31,7 @@ addTraversals prg@Prog{ddefs,fundefs,mainExp} = do
   funs <- mapM (addTraversalsFn ddefs fundefs) fundefs
   mainExp' <-
     case mainExp of
-      Just (ex,ty) -> Just <$> (,ty) <$> addTraversalsExp ddefs fundefs emptyEnv2 M.empty "mainExp" ex
+      Just (ex,ty) -> Just . (,ty) <$> addTraversalsExp ddefs fundefs emptyEnv2 M.empty "mainExp" ex
       Nothing -> return Nothing
   return prg { ddefs = ddefs
              , fundefs = funs
@@ -42,7 +42,7 @@ addTraversalsFn :: DDefs Ty2 -> FunDefs2 -> FunDef2 -> PassM FunDef2
 addTraversalsFn ddefs fundefs f@FunDef{funName, funArgs, funTy, funBody} = do
     let inlocs = inLocVars funTy
         eff = arrEffs funTy
-    if S.null ((S.fromList inlocs) `S.difference` (S.map (\(Traverse v) -> v) eff)) && not (hasParallelism funTy)
+    if S.null (S.fromList inlocs `S.difference` S.map (\(Traverse v) -> v) eff) && not (hasParallelism funTy)
       then return f
       else do
         let funenv = initFunEnv fundefs
@@ -73,9 +73,8 @@ addTraversalsExp ddefs fundefs env2 renv context ex =
     AppE f locs args -> AppE f locs <$> mapM go args
     PrimAppE f args  -> PrimAppE f <$> mapM go args
     WithArenaE v e -> WithArenaE v <$> addTraversalsExp ddefs fundefs (extendVEnv v ArenaTy env2) renv context e
-    LetE (v,loc,ty,rhs) bod -> do
-      LetE <$> (v,loc,ty,) <$> go rhs <*>
-        addTraversalsExp ddefs fundefs (extendVEnv v ty env2) renv context bod
+    LetE (v,loc,ty,rhs) bod -> LetE . (v,loc,ty,) <$> go rhs <*>
+      addTraversalsExp ddefs fundefs (extendVEnv v ty env2) renv context bod
     IfE a b c  -> IfE <$> go a <*> go b <*> go c
     MkProdE xs -> MkProdE <$> mapM go xs
     ProjE i e  -> ProjE i <$> go e
@@ -97,7 +96,7 @@ addTraversalsExp ddefs fundefs env2 renv context ex =
                       AfterVariableLE _ lc _ -> renv # lc
                       FromEndLE lc           -> renv # lc -- TODO: This needs to be fixed
                       FreeLE -> error "addTraversalsExp: FreeLE not handled"
-          in Ext <$> LetLocE loc locexp <$>
+          in Ext . LetLocE loc locexp <$>
                addTraversalsExp ddefs fundefs env2 (M.insert loc reg renv) context bod
         _ -> return ex
     MapE{}  -> error "addTraversalsExp: TODO MapE"
@@ -109,7 +108,7 @@ addTraversalsExp ddefs fundefs env2 renv context ex =
     docase reg (dcon,vlocs,rhs) = do
       let (vars,locs) = unzip vlocs
           env21 = extendPatternMatchEnv dcon ddefs vars locs env2
-          renv1 = L.foldr (\lc acc -> M.insert lc reg acc) renv locs
+          renv1 = L.foldr (`M.insert` reg) renv locs
           needs_traversal = needsTraversalCase ddefs fundefs env21 (dcon,vlocs,rhs)
       case needs_traversal of
         Nothing -> pure (dcon, vlocs, rhs)
@@ -121,7 +120,7 @@ addTraversalsExp ddefs fundefs env2 renv context ex =
           -- Generate traversals: assuming that InferLocs has already generated
           -- the traversal functions, we only use it here.
           trav_binds <- genTravBinds (L.map (\(p_var, _p_loc) -> (VarE p_var, lookupVEnv p_var env21)) ls)
-          (dcon,vlocs,) <$> mkLets trav_binds <$>
+          (dcon,vlocs,) . mkLets trav_binds <$>
             addTraversalsExp ddefs fundefs env21 renv1 context rhs
 
 
@@ -155,7 +154,7 @@ needsTraversalCase ddefs fundefs env2 (dcon,vlocs,rhs) =
                                   -- Get the locations of all non-static things which the RHS does not traverse.
                                   -- Note: Using Data.Set changes the order of packedlocs, and we would
                                   -- like to preserve it.
-                              in L.map effToLoc $ packedlocs L.\\ (S.toList eff)
+                              in L.map effToLoc $ packedlocs L.\\ S.toList eff
 
    in case L.findIndex isPackedTy tys of
         Nothing -> Nothing
@@ -183,7 +182,7 @@ needsTraversalCase ddefs fundefs env2 (dcon,vlocs,rhs) =
 
 genTravBinds :: [(Exp2, Ty2)] -> PassM [(Var, [LocVar], Ty2, Exp2)]
 genTravBinds ls = concat <$>
-  (forM ls $ \(e,ty) ->
+  forM ls (\(e,ty) ->
       case ty of
         PackedTy tycon loc1 -> do
           w <- gensym "trav"
@@ -200,5 +199,5 @@ genTravBinds ls = concat <$>
                                    else acc)
                                   []
                                   (zip tys [0..]))
-          return $ [(tmp,[],ty,e)] ++ proj_binds
+          return $ (tmp,[],ty,e) : proj_binds
         _ -> return [])

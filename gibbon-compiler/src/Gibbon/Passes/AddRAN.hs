@@ -129,11 +129,11 @@ addRAN needRANsTyCons prg@Prog{ddefs,fundefs,mainExp} = do
   let iddefs = withRANDDefs needRANsTyCons ddefs
   funs <- mapM (\(nm,f) -> (nm,) <$> addRANFun needRANsTyCons iddefs f) (M.toList fundefs)
   new_fns <- mapM (genRelOffsetsFunNameFn needRANsTyCons ddefs) (M.elems ddefs)
-  let funs' = (M.fromList funs) `M.union`
-              (M.fromList $ L.map (\f -> (funName f, f)) new_fns)
+  let funs' = M.fromList funs `M.union`
+              M.fromList (L.map (\f -> (funName f, f)) new_fns)
   mainExp' <-
     case mainExp of
-      Just (ex,ty) -> Just <$> (,ty) <$> addRANExp False needRANsTyCons iddefs M.empty ex
+      Just (ex,ty) -> Just . (,ty) <$> addRANExp False needRANsTyCons iddefs M.empty ex
       Nothing -> return Nothing
   let l1 = prg { ddefs = iddefs
                , fundefs = funs'
@@ -183,12 +183,11 @@ addRANExp dont_change_datacons needRANsTyCons ddfs ienv ex =
     LitSymE{} -> return ex
     AppE f locs args -> AppE f locs <$> mapM go args
     PrimAppE f args  -> PrimAppE f <$> mapM go args
-    LetE (v,loc,ty,rhs) bod -> do
-      LetE <$> (v,loc,ty,) <$> go rhs <*> go bod
+    LetE (v,loc,ty,rhs) bod -> LetE <$> (v,loc,ty,) <$> go rhs <*> go bod
     IfE a b c  -> IfE <$> go a <*> go b <*> go c
     MkProdE xs -> MkProdE <$> mapM go xs
     ProjE i e  -> ProjE i <$> go e
-    CaseE scrt mp -> CaseE scrt <$> concat <$> mapM doalt mp
+    CaseE scrt mp -> CaseE scrt . concat <$> mapM doalt mp
     TimeIt e ty b -> do
       e' <- go e
       return $ TimeIt e' ty b
@@ -215,8 +214,7 @@ addRANExp dont_change_datacons needRANsTyCons ddfs ienv ex =
         AppE f locs args -> AppE f locs $ map changeSpawnToApp args
         PrimAppE f args  -> PrimAppE f $ map changeSpawnToApp args
         LetE (_,_,_,SyncE) bod -> changeSpawnToApp bod
-        LetE (v,loc,ty,rhs) bod -> do
-          LetE (v,loc,ty, changeSpawnToApp rhs) (changeSpawnToApp bod)
+        LetE (v,loc,ty,rhs) bod -> LetE (v,loc,ty, changeSpawnToApp rhs) (changeSpawnToApp bod)
         IfE a b c  -> IfE (changeSpawnToApp a) (changeSpawnToApp b) (changeSpawnToApp c)
         MkProdE xs -> MkProdE $ map changeSpawnToApp xs
         ProjE i e  -> ProjE i $ changeSpawnToApp e
@@ -258,8 +256,8 @@ addRANExp dont_change_datacons needRANsTyCons ddfs ienv ex =
                 ienv'' = M.union ienv (M.fromList $ zip haveRANsFor relRanVars)
             bod' <- addRANExp dont_change_datacons needRANsTyCons ddfs ienv' bod
             bod'' <- addRANExp dont_change_datacons needRANsTyCons ddfs ienv'' bod
-            let abs_ran_clause = (toAbsRANDataCon dcon, (L.map (,()) absRanVars) ++ vs, bod')
-            let rel_ran_clause = (toRelRANDataCon dcon, (L.map (,()) relRanVars') ++ vs, bod'')
+            let abs_ran_clause = (toAbsRANDataCon dcon, L.map (,()) absRanVars ++ vs, bod')
+            let rel_ran_clause = (toRelRANDataCon dcon, L.map (,()) relRanVars' ++ vs, bod'')
             dflags <- getDynFlags
             if gopt Opt_RelativeOffsets dflags
               then pure [abs_ran_clause,rel_ran_clause]
@@ -302,7 +300,7 @@ numRANsDataCon ddfs dcon
   | otherwise =
     case L.findIndex isPackedTy tys of
       Nothing -> 0
-      Just firstPacked -> (length tys) - firstPacked - 1
+      Just firstPacked -> length tys - firstPacked - 1
     where tys = lookupDataCon ddfs dcon
 
 {-
@@ -322,12 +320,12 @@ hacky L1 primop, AddCursorP for this purpose.
 
 -}
 mkRANs :: RANEnv -> [Exp1] -> PassM [(Var, [()], Ty1, Exp1)]
-mkRANs ienv needRANsExp =
+mkRANs _ needRANsExp =
   snd <$> foldlM (\(mb_most_recent_ran, acc) arg -> do
           i <- gensym "ran"
           -- See Note [Reusing RAN's in case expressions]
           let rhs = case arg of
-                      VarE x -> PrimAppE RequestEndOf [arg]
+                      VarE _ -> PrimAppE RequestEndOf [arg]
                                 -- case M.lookup x ienv of
                                 --   Just v  -> VarE v
                                 --   Nothing -> PrimAppE RequestEndOf [arg]
@@ -353,7 +351,7 @@ needsRAN Prog{ddefs,fundefs,mainExp} =
       dofun FunDef{funArgs,funTy,funBody} =
         let inlocs = inLocVars funTy
             eff = arrEffs funTy
-        in if S.null ((S.fromList inlocs) `S.difference` (S.map (\(Traverse v) -> v) eff)) && not (hasParallelism funTy)
+        in if S.null (S.fromList inlocs `S.difference` S.map (\(Traverse v) -> v) eff) && not (hasParallelism funTy)
              then S.empty
              else let tyenv = M.fromList $ zip funArgs (inTys funTy)
                       env2 = Env2 tyenv funenv
@@ -419,16 +417,15 @@ we need random access for that type.
     LetE (v,_,ty,SyncE) bod ->
       let s_bod = needsRANExp ddefs fundefs (extendVEnv v ty env2) renv tcenv [] bod
           regss = map (map (renv #)) parlocss
-          deleteAt idx xs = let (lft, (_:rgt)) = splitAt idx xs
+          deleteAt idx xs = let (lft, _:rgt) = splitAt idx xs
                             in lft ++ rgt
-          common_regs = S.unions $ map
-                          (\(i,rs) -> let all_other_regs = concat (deleteAt i regss)
-                                      in S.intersection (S.fromList rs) (S.fromList all_other_regs))
-                          (zip [0..] regss)
+          common_regs = S.unions $ zipWith (\i rs -> 
+            let all_other_regs = concat (deleteAt i regss)
+            in S.intersection (S.fromList rs) (S.fromList all_other_regs)) [0..] regss
       in if S.null common_regs
          then S.empty
          else let want_ran_locs = L.filter (\lc -> (renv # lc) `S.member` common_regs) (concat parlocss)
-              in s_bod `S.union` (S.fromList $ map (tcenv #) want_ran_locs)
+              in s_bod `S.union` S.fromList (map (tcenv #) want_ran_locs)
 
     SpawnE{} -> error "needsRANExp: Unbound SpawnE"
     SyncE    -> error "needsRANExp: Unbound SyncE"
@@ -464,9 +461,9 @@ we need random access for that type.
     -- Collect all the 'Tycon's which might random access nodes
     doalt tycon reg env21 renv1 tcenv1 parlocss1 br@(dcon,vlocs,bod) =
       let (vars,locs) = unzip vlocs
-          renv' = L.foldr (\lc acc -> M.insert lc reg acc) renv1 locs
+          renv' = L.foldr (`M.insert` reg) renv1 locs
           env21' = extendPatternMatchEnv dcon ddefs vars locs env21
-          ran_for_scrt = case (needsTraversalCase ddefs fundefs env2 br) of
+          ran_for_scrt = case needsTraversalCase ddefs fundefs env2 br of
                            Nothing -> S.empty
                            Just{}  -> S.singleton tycon
       in ran_for_scrt `S.union` needsRANExp ddefs fundefs env21' renv' tcenv1 parlocss1 bod
@@ -524,7 +521,7 @@ _add_size_and_rel_offsets_Foo foo =
 -}
 genRelOffsetsFunNameFn :: S.Set TyCon -> DDefs Ty1 -> DDef Ty1 -> PassM FunDef1
 genRelOffsetsFunNameFn needRANsTyCons ddfs DDef{tyName, dataCons} = do
-  arg <- gensym $ "arg"
+  arg <- gensym "arg"
   casebod <- forM dataCons $ \(dcon, dtys) ->
              do let tys = L.map snd dtys
                 xs <- mapM (\_ -> gensym "x") tys
@@ -537,42 +534,38 @@ genRelOffsetsFunNameFn needRANsTyCons ddfs DDef{tyName, dataCons} = do
                                                else LetE (y, [], ty, VarE x) acc)
                                             acc
                                             (L.zip3 tys xs ys)
-                       if not (S.member (fromVar tyName) needRANsTyCons) then return $ bod0 (DataConE () dcon (map VarE ys))
-                       else if num_offsets == 0
-                       -- Nothing much to do. Just recursively process all the packed arguments.
-                       then return $ bod0 (DataConE () dcon (map VarE ys))
-                       -- We have to add a size field, and offsets in addition to recursively processing
-                       -- the packed arguments.
-                       else do
-                         size_vars <- mapM (\y -> gensym $ toVar $ "sizeof_" ++ fromVar y ++ "_") ys
-                         let size_binds acc = foldr
-                                                (\(sz,y,ty) acc ->
-                                                     if isPackedTy ty
-                                                     then LetE (sz,[],IntTy,PrimAppE RequestSizeOf [VarE y]) acc
-                                                     else LetE (sz,[],IntTy,LitE (fromJust $ sizeOfTy ty)) acc)
-                                                acc (L.zip3 size_vars ys tys)
-                         offset_vars <- mapM (\_ -> gensym "offset_") [0..(num_offsets-1)]
-                         let need_offsets = reverse $ L.take num_offsets (reverse xs)
-                         let addp ls = case ls of
-                                         []       -> LitE 0
-                                         (x:y:[]) -> PrimAppE AddP [VarE x, VarE y]
-                                         (x:rst)  -> PrimAppE AddP [VarE x, addp rst]
-                         let offset_binds acc = foldr
-                                                  (\(ov, x) acc ->
-                                                     let idx_of_x    = fromJust $ L.elemIndex x xs
-                                                         idx_of_ov   = fromJust $ L.elemIndex ov offset_vars
-                                                         offsets_infront = length (L.drop idx_of_ov offset_vars) - 1
-                                                         have_to_add = L.take idx_of_x size_vars
-                                                         rhs = PrimAppE AddP [LitE $ (fromJust (sizeOfTy IntTy)) * offsets_infront,
-                                                                              addp have_to_add]
-                                                     in LetE (ov,[],IntTy,rhs) acc)
-                                                  acc (zip offset_vars need_offsets)
-                         dcon_size <- gensym "size_dcon"
-                         let size_offsets = LitE $ 1 + (fromJust (sizeOfTy IntTy)) * length offset_vars
-                             dcon_size_bind acc = LetE (dcon_size,[],IntTy, PrimAppE AddP [size_offsets, addp size_vars] ) acc
-                             dcon_args = [dcon_size] ++ offset_vars ++  ys
-                             dcon' = toRelRANDataCon dcon
-                         pure $ bod0 $ size_binds $ offset_binds $ dcon_size_bind $ DataConE () dcon' (map VarE dcon_args)
+                       if not (S.member (fromVar tyName) needRANsTyCons) || num_offsets == 0 then return $ bod0 (DataConE () dcon (map VarE ys)) else (
+                        do
+                        size_vars <- mapM (\y -> gensym $ toVar $ "sizeof_" ++ fromVar y ++ "_") ys
+                        let size_binds acc = foldr
+                                              (\(sz,y,ty) acc ->
+                                                    if isPackedTy ty
+                                                    then LetE (sz,[],IntTy,PrimAppE RequestSizeOf [VarE y]) acc
+                                                    else LetE (sz,[],IntTy,LitE (fromJust $ sizeOfTy ty)) acc)
+                                              acc (L.zip3 size_vars ys tys)
+                        offset_vars <- mapM (\_ -> gensym "offset_") [0..(num_offsets-1)]
+                        let need_offsets = reverse $ L.take num_offsets (reverse xs)
+                        let addp ls = case ls of
+                                        []       -> LitE 0
+                                        [x, y] -> PrimAppE AddP [VarE x, VarE y]
+                                        (x:rst)  -> PrimAppE AddP [VarE x, addp rst]
+                        let offset_binds acc = foldr
+                                                (\(ov, x) acc ->
+                                                    let idx_of_x    = fromJust $ L.elemIndex x xs
+                                                        idx_of_ov   = fromJust $ L.elemIndex ov offset_vars
+                                                        offsets_infront = length (L.drop idx_of_ov offset_vars) - 1
+                                                        have_to_add = L.take idx_of_x size_vars
+                                                        rhs = PrimAppE AddP [LitE $ fromJust (sizeOfTy IntTy) * offsets_infront,
+                                                                            addp have_to_add]
+                                                    in LetE (ov,[],IntTy,rhs) acc)
+                                                acc (zip offset_vars need_offsets)
+                        dcon_size <- gensym "size_dcon"
+                        let
+                          dcon_size_bind = LetE (dcon_size,[],IntTy, PrimAppE AddP [size_offsets, addp size_vars] )
+                          size_offsets = LitE $ 1 + fromJust (sizeOfTy IntTy) * length offset_vars
+                          dcon_args = [dcon_size] ++ offset_vars ++  ys
+                          dcon' = toRelRANDataCon dcon
+                        pure $ bod0 $ size_binds $ offset_binds $ dcon_size_bind $ DataConE () dcon' (map VarE dcon_args))
                 return (dcon, L.map (\x -> (x,())) xs, bod)
 
   return $ FunDef { funName = mkRelOffsetsFunName (fromVar tyName)

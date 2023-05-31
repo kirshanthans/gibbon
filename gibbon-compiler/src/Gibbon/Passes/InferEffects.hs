@@ -39,7 +39,7 @@ locsEffect = S.fromList . L.map Traverse
 --   Subsequently, these monotonically SHRINK until a fixpoint.
 --   We also associate fresh location variables with packed types.
 initialEnv :: FunDefs2 -> FunEnv2
-initialEnv mp = M.map go mp
+initialEnv = M.map go
   where
     go :: FunDef2 -> ArrowTy2
     go FunDef{funTy} =
@@ -61,7 +61,7 @@ inferEffects prg@Prog{ddefs,fundefs} = do
        let funtys = M.map (inferFunDef ddefs fenv) funs
        in
          if fenv == funtys
-         then dbgTrace lvl ("\n<== Fixpoint completed after iteration "++show iter++" ==>") $ fenv
+         then dbgTrace lvl ("\n<== Fixpoint completed after iteration "++show iter++" ==>") fenv
          else fixpoint (iter+1) funs funtys
 
 
@@ -143,7 +143,7 @@ inferExp ddfs fenv env dps expr =
 
           -- Critical policy point!  We only get to the end if ALL
           -- branches get to the end.
-          end = if all id bools
+          end = if and bools
                 then case loc1 of
                        Just v  -> S.singleton (Traverse v)
                        Nothing -> S.empty
@@ -171,7 +171,7 @@ inferExp ddfs fenv env dps expr =
     Ext (IndirectionE{})   -> (S.empty, Nothing)
     Ext (BoundsCheck{})    -> (S.empty, Nothing)
     Ext (AddFixed{})       -> error "inferEffects: AddFixed not handled."
-    Ext (GetCilkWorkerNum) -> (S.empty, Nothing)
+    Ext GetCilkWorkerNum -> (S.empty, Nothing)
     Ext (LetAvail _ e)     -> inferExp ddfs fenv env dps e
 
   where
@@ -186,10 +186,12 @@ inferExp ddfs fenv env dps expr =
     caserhs (dcon,patVs,e) =
       let (vars,locs) = L.unzip patVs
           tys    = lookupDataCon ddfs dcon
-          zipped = fragileZip' vars tys ("Error in "++ dcon ++" case: "
-                                         ++"pattern vars, "++show vars++
-                                         ", do not match the number of types "
-                                         ++show tys)
+          zipped = fragileZip' vars tys $ mconcat 
+            [ "Error in ", dcon, " case: "
+            , "pattern vars, ", show vars
+            , ", do not match the number of types "
+            , show tys
+            ]
 
           env' = M.union env (M.fromList zipped)
 
@@ -209,7 +211,7 @@ inferExp ddfs fenv env dps expr =
           (eff,_) = inferExp ddfs fenv env' dps' e
           eff' = substEffs subst_mp eff
           winner = -- If there is NO packed child data, then our object has static size:
-                   (L.all (not . hasPacked) tys) ||
+                   not (any hasPacked tys) ||
 
                    -- Or if all non-static items were traversed:
                    (case packedOnly of
@@ -223,6 +225,6 @@ inferExp ddfs fenv env dps expr =
 
           -- Also, in any binding form we are obligated to not return
           -- our local bindings in traversal side effects:
-          isNotLocal (Traverse v) = not $ L.elem v locs
+          isNotLocal (Traverse v) = notElem v locs
           stripped = S.filter isNotLocal eff'
       in  ( winner, (stripped,Nothing) )

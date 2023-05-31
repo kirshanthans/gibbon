@@ -14,13 +14,16 @@ import Gibbon.L2.Syntax
 import qualified Gibbon.L4.Syntax as L4
 import Gibbon.Passes.Freshen (freshNames1, freshFun1)
 
+import Data.Bifunctor (second)
+import Data.Maybe (fromMaybe)
+
 --------------------------------------------------------------------------------
 
 markRecFns :: Prog1 -> PassM Prog1
 markRecFns (Prog ddefs fundefs main) = do
     let fundefs' = M.map
                      (\fn@FunDef{funName,funBody,funMeta} ->
-                          if funName `S.member` (gFreeVars funBody)
+                          if funName `S.member` gFreeVars funBody
                           then fn { funMeta = funMeta { funRec = Rec } }
                           else fn)
                      fundefs
@@ -31,10 +34,10 @@ inlineFuns (Prog ddefs fundefs main) = do
     main' <- case main of
                Nothing -> pure Nothing
                Just (e,ty) -> do
-                 e' <- (cataM go) e
+                 e' <- cataM go e
                  pure $ Just (e', ty)
     fundefs' <- mapM (\fn -> do
-                           bod <- (cataM go) (funBody fn)
+                           bod <- cataM go (funBody fn)
                            pure $ fn { funBody = bod})
                      fundefs
     pure (Prog ddefs fundefs' main')
@@ -83,7 +86,7 @@ deadFunElim (Prog ddefs fundefs main) = do
            then getUsedFns todo' inspected acc
            else
              let FunDef{funArgs, funName,funBody} = fundefs M.! f
-                 free = (gFreeVars funBody) `S.difference` (S.fromList (funName : funArgs))
+                 free = gFreeVars funBody `S.difference` S.fromList (funName : funArgs)
              in getUsedFns (free <> todo') (S.insert f inspected) (acc <> free)
 
 simplifyL1 :: Prog1 -> PassM Prog1
@@ -91,8 +94,7 @@ simplifyL1 p0 = do
     p0' <- freshNames1 p0
     p1 <- markRecFns p0'
     p2 <- inlineFuns p1
-    p3 <- deadFunElim p2
-    pure p3
+    deadFunElim p2
 
 --------------------------------------------------------------------------------
 
@@ -110,75 +112,12 @@ simplifyLocBinds (Prog ddefs fundefs mainExp) = do
         in f { funBody = funBody' }
 
     -- partially evaluate location arithmetic
-    go :: M.Map LocVar (LocVar,Int) -> Exp2 -> Exp2
-    go env ex =
-      case ex of
-        AppE f locs args -> AppE f locs (map (go env) args)
-        PrimAppE p args -> PrimAppE p (map (go env) args)
-        LetE (v,locs,ty,rhs) bod -> LetE (v,locs,ty,(go env rhs)) (go env bod)
-        IfE a b c -> IfE (go env a) (go env b) (go env c)
-        MkProdE args -> MkProdE (map (go env) args)
-        ProjE i bod -> ProjE i (go env bod)
-        CaseE scrt brs -> CaseE (go env scrt) (map (\(a,b,c) -> (a,b,go env c)) brs)
-        DataConE loc dcon args -> DataConE loc dcon (map (go env) args)
-        TimeIt e ty b -> TimeIt (go env e) ty b
-        WithArenaE v bod -> WithArenaE v (go env bod)
-        SpawnE f locs args -> SpawnE f locs (map (go env) args)
-        Ext ext ->
-          case ext of
-            LetRegionE reg sz ty bod -> Ext (LetRegionE reg sz ty (go env bod))
-            LetParRegionE reg sz ty bod -> Ext (LetParRegionE reg sz ty (go env bod))
-            LetLocE loc (AfterConstantLE i loc2) bod ->
-              case (M.lookup loc2 env) of
-                Nothing ->
-                  Ext $ LetLocE loc (AfterConstantLE i loc2) $
-                        go (M.insert loc (loc2,i) env) bod
-                Just (loc3,j) ->
-                  Ext $ LetLocE loc (AfterConstantLE (i+j) loc3) $
-                        go (M.insert loc (loc3,i+j) env) bod
-            LetLocE loc rhs bod -> Ext (LetLocE loc rhs (go env bod))
-            LetAvail vars bod -> Ext (LetAvail vars (go env bod))
-            _ -> Ext ext
-        _ -> ex
-
-    -- drop dead bindings
-    go2 :: Exp2 -> Exp2
-    go2 ex =
-      case ex of
-        AppE f locs args -> AppE f locs (map go2 args)
-        PrimAppE p args -> PrimAppE p (map go2 args)
-        LetE (v,locs,ty,rhs) bod -> LetE (v,locs,ty,(go2 rhs)) (go2 bod)
-        IfE a b c -> IfE (go2 a) (go2 b) (go2 c)
-        MkProdE args -> MkProdE (map go2 args)
-        ProjE i bod -> ProjE i (go2 bod)
-        CaseE scrt brs -> CaseE (go2 scrt) (map (\(a,b,c) -> (a,b,go2 c)) brs)
-        DataConE loc dcon args -> DataConE loc dcon (map go2 args)
-        TimeIt e ty b -> TimeIt (go2 e) ty b
-        WithArenaE v bod -> WithArenaE v (go2 bod)
-        SpawnE f locs args -> SpawnE f locs (map go2 args)
-        Ext ext ->
-          case ext of
-            LetRegionE reg sz ty bod -> Ext (LetRegionE reg sz ty (go2 bod))
-            LetParRegionE reg sz ty bod -> Ext (LetParRegionE reg sz ty (go2 bod))
-            LetLocE loc rhs bod ->
-              let bod' = go2 bod
-                  free_vars = (allFreeVars bod')
-              in
-                if (loc `elem` free_vars)
-                then Ext (LetLocE loc rhs bod')
-                else bod'
-            LetAvail vars bod -> Ext (LetAvail vars (go2 bod))
-            _ -> Ext ext
-        _ -> ex
-
-
-    -- partially evaluate location arithmetic
     go0 :: M.Map LocExp LocVar -> M.Map LocVar LocVar -> Exp2 -> Exp2
     go0 env1 env2 ex =
       case ex of
         AppE f locs args -> AppE f (map (substloc env2) locs) (map (go0 env1 env2) args)
         PrimAppE p args -> PrimAppE p (map (go0 env1 env2) args)
-        LetE (v,locs,ty,rhs) bod -> LetE (v,locs,substLoc env2 ty,(go0 env1 env2 rhs)) (go0 env1 env2 bod)
+        LetE (v,locs,ty,rhs) bod -> LetE (v,locs,substLoc env2 ty,go0 env1 env2 rhs) (go0 env1 env2 bod)
         IfE a b c -> IfE (go0 env1 env2 a) (go0 env1 env2 b) (go0 env1 env2 c)
         MkProdE args -> MkProdE (map (go0 env1 env2) args)
         ProjE i bod -> ProjE i (go0 env1 env2 bod)
@@ -203,9 +142,7 @@ simplifyLocBinds (Prog ddefs fundefs mainExp) = do
             _ -> Ext ext
         _ -> ex
       where
-        substloc env loc = case M.lookup loc env of
-                             Nothing  -> loc
-                             Just new -> new
+        substloc env loc = fromMaybe loc (M.lookup loc env)
 
 --------------------------------------------------------------------------------
 
@@ -213,8 +150,7 @@ lateInlineTriv :: L4.Prog -> PassM L4.Prog
 lateInlineTriv (L4.Prog sym_tbl fundefs mainExp) = do
     let fundefs' = map lateInlineTrivFn fundefs
         mainExp' = case mainExp of
-                       Just (L4.PrintExp tl) -> do
-                           Just (L4.PrintExp (lateInlineTrivExp M.empty tl))
+                       Just (L4.PrintExp tl) -> Just (L4.PrintExp (lateInlineTrivExp M.empty tl))
                        Nothing -> Nothing
     return $ L4.Prog sym_tbl fundefs' mainExp'
   where
@@ -228,17 +164,15 @@ lateInlineTriv (L4.Prog sym_tbl fundefs mainExp) = do
       where
         gotriv env trv =
             case trv of
-                L4.VarTriv v -> case M.lookup v env of
-                                 Nothing -> trv
-                                 Just t2 -> t2
+                L4.VarTriv v -> fromMaybe trv (M.lookup v env)
                 L4.ProdTriv ls -> L4.ProdTriv (map (gotriv env) ls)
                 L4.ProjTriv i t -> L4.ProjTriv i (gotriv env t)
                 _ -> trv
 
         goalts env alts =
             case alts of
-                L4.TagAlts ls -> L4.TagAlts $ map (\(t,tl) -> (t,go env tl)) ls
-                L4.IntAlts ls -> L4.IntAlts $ map (\(t,tl) -> (t,go env tl)) ls
+                L4.TagAlts ls -> L4.TagAlts $ map (second (go env)) ls
+                L4.IntAlts ls -> L4.IntAlts $ map (second (go env)) ls
         go env tl =
               case tl of
                    L4.RetValsT trvs ->
@@ -260,7 +194,7 @@ lateInlineTriv (L4.Prog sym_tbl fundefs mainExp) = do
                    L4.LetUnpackT binds ptr bod ->
                        L4.LetUnpackT binds ptr (go env bod)
                    L4.LetAllocT lhs vals bod ->
-                       L4.LetAllocT lhs (map (\(ty,trv) -> (ty,gotriv env trv)) vals) (go env bod)
+                       L4.LetAllocT lhs (map (second (gotriv env)) vals) (go env bod)
                    L4.LetAvailT vars bod ->
                        L4.LetAvailT vars (go env bod)
                    L4.IfT tst thn els ->

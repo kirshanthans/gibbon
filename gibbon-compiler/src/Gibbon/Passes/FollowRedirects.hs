@@ -2,11 +2,11 @@ module Gibbon.Passes.FollowRedirects
   ( followRedirects ) where
 
 
-import Prelude hiding (tail)
+import Prelude hiding ( tail )
 import qualified Data.Map as M
 
 import Gibbon.Common
-import Gibbon.Language ( TyEnv, indirectionAlt, redirectionAlt, isPrinterName)
+import Gibbon.Language ( TyEnv, isPrinterName )
 import Gibbon.L4.Syntax as L4
 
 {- [Modifying switch statements to use redirection nodes]
@@ -60,7 +60,7 @@ followRedirects (Prog sym_tbl fundefs mainExp) = do
   fundefs' <- mapM followRedirectsFn fundefs
   mainExp' <- case mainExp of
                 Just (PrintExp tail) ->
-                  Just <$> PrintExp <$> followRedirectsExp False M.empty M.empty tail
+                  Just . PrintExp <$> followRedirectsExp False M.empty M.empty tail
                 Nothing -> return Nothing
   return $ Prog sym_tbl fundefs' mainExp'
 
@@ -89,34 +89,24 @@ followRedirectsExp isPrintFn ttailenv tenv tail =
           ctmp <- gensym "tmpaftercur"
           tagtmp <- gensym "tagtmp"
           tailtmp <- gensym "tailtmp"
-          let alttail = LetPrimCallT [(vtmp,CursorTy),(ctmp,CursorTy)] ReadCursor [VarTriv tailv] $
-                          (LetPrimCallT [(tagtmp,TagTyPacked),(tailtmp,CursorTy)] ReadTag [VarTriv vtmp] $
+          let alttail = LetPrimCallT [(vtmp,CursorTy),(ctmp,CursorTy)] ReadCursor [VarTriv tailv]
+                          (LetPrimCallT [(tagtmp,TagTyPacked),(tailtmp,CursorTy)] ReadTag [VarTriv vtmp]
                           (AssnValsT [(tagv , TagTyPacked, VarTriv tagtmp),
                                      (tailv, CursorTy   , VarTriv tailtmp)]
                           (Just (Goto lbl))))
 
-              _alttail_ind = if isPrintFn
-                            then LetPrimCallT [] (PrintString " ->i ") [] $ alttail
-                            else alttail
-              alttail_red = if isPrintFn
-                            then LetPrimCallT [] (PrintString " ->r ") [] $ alttail
-                            else alttail
+              _alttail_ind =
+                if isPrintFn
+                then LetPrimCallT [] (PrintString " ->i ") [] alttail
+                else alttail
 
           alts' <- case alts of
                     TagAlts ls -> do
                       ls' <- mapM (\(x,tl) -> (x,) <$> go tenv tl) ls
-                      if indirectionAlt `elem` (map fst ls')
-                      then return $ TagAlts $ ls' ++ []-- (redirectionAlt, alttail_red)
-                      else return $ TagAlts $ ls' ++ [-- (redirectionAlt, alttail_red)
-                                                      -- (indirectionAlt, alttail_ind)
-                                                     ]
+                      return $ TagAlts ls'
                     IntAlts ls -> do
                       ls' <- mapM (\(x,tl) -> (x,) <$> go tenv tl) ls
-                      if indirectionAlt `elem` (map fst ls')
-                      then return $ IntAlts $ ls' ++ []-- (redirectionAlt, alttail_red)
-                      else return $ IntAlts $ ls' ++ [-- (redirectionAlt, alttail_red)
-                                                      -- (indirectionAlt, alttail_ind)
-                                                     ]
+                      return $ IntAlts ls'
           return $ Switch lbl trv alts' bod_maybe
         _ -> error "followRedirectsExp: Shouldn't switch on any other type."
 
@@ -145,10 +135,8 @@ followRedirectsExp isPrintFn ttailenv tenv tail =
         go (M.union tenv (M.fromList binds)) bod
     LetUnpackT binds ptr bod ->
       LetUnpackT binds ptr <$> go (M.union tenv (M.fromList binds)) bod
-    LetAllocT lhs vals bod -> do
-      LetAllocT lhs vals <$> go tenv bod
-    LetAvailT vs bod -> do
-      LetAvailT vs <$> go tenv bod
+    LetAllocT lhs vals bod -> LetAllocT lhs vals <$> go tenv bod
+    LetAvailT vs bod -> LetAvailT vs <$> go tenv bod
     IfT tst con els ->
       IfT tst <$> go tenv con <*> go tenv els
     ErrT{} -> return tail

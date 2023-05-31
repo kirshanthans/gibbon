@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-|
 
 With the new location calculus and `inferLocations`, this pass should've been
@@ -54,7 +55,7 @@ findWitnesses p@Prog{fundefs} = mapMExprs fn p
                                                   `Set.union` boundlocs
                                                   )
                                             ex bigNumber)
-  goFix _    ex 0 = error $ "timeout in findWitness on " ++ (show ex)
+  goFix _    ex 0 = error $ "timeout in findWitness on " ++ show ex
   goFix bound0 ex0 n = let ex1 = goE bound0 Map.empty ex0
                            ex2 = goE bound0 Map.empty ex1
                        in if ex1 == ex2 then ex2
@@ -70,10 +71,10 @@ findWitnesses p@Prog{fundefs} = mapMExprs fn p
     let go      = goE bound -- Shorthand.
         goClear = goE (bound `Set.union` Map.keysSet mp) Map.empty
         -- shorthand for applying (L p)
-        handle' e = handle bound fundefs mp e
+        handle' = handle bound fundefs mp
     in
       case ex of
-        LetE (v,locs,t, (TimeIt e ty b)) bod ->
+        LetE (v,locs,t, TimeIt e ty b) bod ->
             handle' $ LetE (v,locs,t, TimeIt (go Map.empty e) ty b)
                       (goE (Set.insert v (bound `Set.union` Map.keysSet mp)) Map.empty bod)
 
@@ -88,13 +89,13 @@ findWitnesses p@Prog{fundefs} = mapMExprs fn p
                  else
                    case locexp of
                      AfterVariableLE v loc2 b ->
-                       (go (Map.insert loc (DelayLoc (loc, (AfterVariableLE v loc2 b))) mp) bod)
+                       go (Map.insert loc (DelayLoc (loc, AfterVariableLE v loc2 b)) mp) bod
                      AfterConstantLE i loc2 ->
-                       go (Map.insert loc (DelayLoc (loc, (AfterConstantLE i loc2))) mp) bod
+                       go (Map.insert loc (DelayLoc (loc, AfterConstantLE i loc2)) mp) bod
                      _ -> Ext $ LetLocE loc locexp $ goE (Set.insert loc bound) mp bod
             LetRegionE r sz ty bod -> Ext $ LetRegionE r sz ty $ go mp bod
             LetParRegionE r sz ty bod -> Ext $ LetParRegionE r sz ty $ go mp bod
-            _ -> handle' $ ex
+            _ -> handle' ex
 
         LetE (v,locs,t,rhs) bod ->
           let rhs' = go Map.empty rhs -- recur on rhs, but flatten makes these pretty boring.
@@ -151,11 +152,11 @@ handle bound fundefs mp expr =
     buildLets mp vars expr
     where freeInBind v = case Map.lookup (view v) mp of
                            Nothing -> []
-                           Just (DelayVar (_v,_locs,_t,e)) -> Set.toList $ (ex_freeVars e) `Set.difference` (Map.keysSet fundefs)
-                           Just (DelayLoc (_loc, locexp)) -> Set.toList $ (gFreeVars locexp) `Set.difference` (Map.keysSet fundefs)
+                           Just (DelayVar (_v,_locs,_t,e)) -> Set.toList $ ex_freeVars e `Set.difference` Map.keysSet fundefs
+                           Just (DelayLoc (_loc, locexp)) -> Set.toList $ gFreeVars locexp `Set.difference` Map.keysSet fundefs
 
           (g,vf,_) = graphFromEdges $ zip3 vs vs $ map freeInBind vs
-          vars = reverse $ map (\(x,_,_) -> x) $ map vf $ topSort g
+          vars = reverse $ map ((\(x,_,_) -> x) . vf) (topSort g)
           vs = Map.keys $ Map.filterWithKey (\k _v -> Set.member k bound) mp
 
 
@@ -191,24 +192,24 @@ closed bound mp = Set.null (allBound `Set.difference` allUsed)
   where
    allBound = bound `Set.union` Map.keysSet mp
    -- allUsed = Set.unions [ gFreeVars rhs | (_,_,_,rhs) <- Map.elems mp ]
-   allUsed = Set.unions $ map (\db -> case db of
-                                  DelayVar (_,_,_,rhs) -> ex_freeVars rhs
-                                  DelayLoc (_,locexp)  -> gFreeVars locexp)
-                          (Map.elems mp)
+   allUsed = Set.unions $ map (\case
+      DelayVar (_,_,_,rhs) -> ex_freeVars rhs
+      DelayLoc (_,locexp)  -> gFreeVars locexp)
+    (Map.elems mp)
 
 mapMExprs :: Monad m => (Env2 Ty2 -> Set.Set LocVar -> Exp2 -> m Exp2) -> Prog2 -> m Prog2
 mapMExprs fn (Prog ddfs fundefs mainExp) =
   Prog ddfs <$>
-    (mapM (\f@FunDef{funArgs,funTy,funBody} ->
+    mapM (\f@FunDef{funArgs,funTy,funBody} ->
               let env = Env2 (Map.fromList $ zip funArgs (inTys funTy)) funEnv
                   boundlocs = Set.fromList (allLocVars funTy) `Set.union`
                               Set.fromList funArgs
               in do
                 bod' <- fn env boundlocs funBody
                 return $ f { funBody =  bod' })
-     fundefs)
+     fundefs
     <*>
-    (mapM (\ (e,t) -> (,t) <$> fn (Env2 Map.empty funEnv) Set.empty e) mainExp)
+    mapM (\ (e,t) -> (,t) <$> fn (Env2 Map.empty funEnv) Set.empty e) mainExp
   where funEnv = Map.map funTy fundefs
 
 ex_freeVars :: Exp2 -> Set.Set Var

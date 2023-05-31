@@ -32,10 +32,10 @@ inlineTriv (Prog ddefs funs main) =
 type ExpEnv e l d = M.Map Var (PreExp e l d)
 
 inlineTrivExp :: forall e l d. HasSimplifiable e l d
-              => ExpEnv e l d -> (PreExp e l d) -> (PreExp e l d)
+              => ExpEnv e l d -> PreExp e l d -> PreExp e l d
 inlineTrivExp = go
   where
-  go :: ExpEnv e l d -> (PreExp e l d) -> (PreExp e l d)
+  go :: ExpEnv e l d -> PreExp e l d -> PreExp e l d
   go env e0 =
     case e0 of
       VarE v    -> case M.lookup v env of

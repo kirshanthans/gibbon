@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE CPP              #-}
-{-# LANGUAGE RecordWildCards  #-}
+
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 -- | Insert end witnesses in an L2 program by changing function types,
@@ -78,21 +78,21 @@ findEnd :: LocVar -> EndOfRel -> LocVar
 findEnd l EndOfRel{endOf,equivTo} =
     case M.lookup l endOf of -- Can we immediately look up the end of l?
       Nothing -> case M.lookup l equivTo of -- Is there an equivalent location to use?
-                   Nothing -> error $ "Failed finding the end of " ++ (show l)
+                   Nothing -> error $ "Failed finding the end of " ++ show l
                    Just leq -> findEnd leq EndOfRel{endOf,equivTo}
       Just lend -> lend
 
 eorAppend :: EndOfRel -> EndOfRel -> EndOfRel
 eorAppend eor1 eor2 =
-    EndOfRel { endOf   = (endOf eor1) `M.union` (endOf eor2)
-             , equivTo = (equivTo eor1) `M.union` (equivTo eor2) }
+    EndOfRel { endOf   = endOf eor1 `M.union` endOf eor2
+             , equivTo = equivTo eor1 `M.union` equivTo eor2 }
 
 instance Monoid EndOfRel where
   mempty  = emptyRel
 
-#if !(MIN_VERSION_base(4,11,0))
-  mappend = eorAppend
-#endif
+
+
+
 
 instance Semigroup EndOfRel where
   (<>) = eorAppend
@@ -111,8 +111,7 @@ bindReturns ex =
         MkTrue -> handleScalarRet ex id
         MkFalse -> handleScalarRet ex id
         _ -> pure ex
-    LetE (v,locs,ty,rhs) bod | isScalar bod -> do
-      handleScalarRet bod (\bod' -> LetE (v,locs,ty,rhs) bod')
+    LetE (v,locs,ty,rhs) bod | isScalar bod -> handleScalarRet bod (LetE (v,locs,ty,rhs))
 
     LetE (v,locs,ty,rhs) bod -> do
       -- rhs' <- bindReturns rhs
@@ -128,7 +127,7 @@ bindReturns ex =
     ProjE{} -> pure ex
     CaseE scrt brs -> do
       scrt' <- bindReturns scrt
-      CaseE scrt' <$> (mapM (\(a,b,c) -> (a,b,) <$> bindReturns c) brs)
+      CaseE scrt' <$> mapM (\(a,b,c) -> (a,b,) <$> bindReturns c) brs
     DataConE{} -> pure ex
     TimeIt{} -> pure ex
     SpawnE{} -> pure ex
@@ -156,14 +155,14 @@ bindReturns ex =
         LetAvail a bod  -> do
           bod' <- bindReturns bod
           pure $ Ext $ LetAvail a bod'
-    MapE{}  -> error $ "bindReturns: TODO MapE"
-    FoldE{} -> error $ "bindReturns: TODO FoldE"
+    MapE{}  -> error "bindReturns: TODO MapE"
+    FoldE{} -> error "bindReturns: TODO FoldE"
 
 handleScalarRet :: Exp2 -> (Exp2 -> Exp2) -> PassM Exp2
 handleScalarRet bod fn = do
   let bind_and_recur bind_e bind_ty = do
         tmp <- gensym "fltScalar"
-        let e1 = (LetE (tmp,[],bind_ty,bind_e) (VarE tmp))
+        let e1 = LetE (tmp,[],bind_ty,bind_e) (VarE tmp)
         pure $ fn e1
   case bod of
     LitE n -> bind_and_recur (LitE n) IntTy
@@ -218,9 +217,9 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
     fdty :: L2.FunDef2 -> PassM L2.FunDef2
     fdty FunDef{funName,funTy,funArgs,funBody,funMeta} =
         do let (ArrowTy2 locin tyin eff tyout _locout isPar) = funTy
-               handleLoc (LRM l r m) ls = if S.member (Traverse l) eff then (LRM l r m):ls else ls
+               handleLoc (LRM l r m) ls = if S.member (Traverse l) eff then LRM l r m:ls else ls
                locout' = L.map EndOf $ L.foldr handleLoc [] locin
-           return FunDef{funName,funTy=(ArrowTy2 locin tyin eff tyout locout' isPar),funArgs,funBody,funMeta}
+           return FunDef{funName,funTy=ArrowTy2 locin tyin eff tyout locout' isPar,funArgs,funBody,funMeta}
 
 
     -- | Process function bodies
@@ -283,7 +282,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
           -- This is the most interesting case: a let bound function application.
           -- We need to update the let binding's extra location binding list with
           -- the end witnesses returned from the function.
-          LetE (v,_ls,ty,(AppE f lsin e1)) e2 -> do
+          LetE (v,_ls,ty,AppE f lsin e1) e2 -> do
                  let lenv' = case ty of
                                PackedTy _n l -> M.insert v l lenv
                                _ -> lenv
@@ -294,7 +293,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
                                (wrapBody e2' newls)
 
           -- Exactly like AppE.
-          LetE (v,_ls,ty,(SpawnE f lsin e1)) e2 -> do
+          LetE (v,_ls,ty,SpawnE f lsin e1) e2 -> do
                  let lenv' = case ty of
                                PackedTy _n l -> M.insert v l lenv
                                _ -> lenv
@@ -313,7 +312,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
                      forM brs $ \(dc, vls, e) ->
                        case vls of
                          [] ->
-                           case (M.lookup x lenv) of
+                           case M.lookup x lenv of
                              Just l1 -> do
                                l2 <- gensym "jump"
                                let eor' = mkEnd l1 l2 eor
@@ -325,18 +324,18 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
                            let need = snd $ last vls
                                argtys = lookupDataCon ddefs dc
                                lx = case M.lookup x lenv of
-                                      Nothing -> error $ "Failed to find " ++ (show x)
+                                      Nothing -> error $ "Failed to find " ++ show x
                                       Just l -> l
                                -- we know lx and need have the same end, since
                                -- lx is the whole packed thing and need is its
                                -- last field, so when we look up the end of lx
                                -- what we really want is the end of need.
                                eor' = mkEqual lx need eor
-                               f (l1,l2) env = M.insert l1 l2 env
+                               f = uncurry M.insert
                                afterenv' = L.foldr f afterenv $ zip (L.map snd vls) (tail $ L.map snd vls)
                                -- two cases here for handing bound parameters:
                                -- we have a packed type:
-                               handleLoc (eor,e) (_,(PackedTy _ _)) = return (eor,e)
+                               handleLoc (eor,e) (_,PackedTy _ _) = return (eor,e)
                                -- or we have a non-packed type, and we need to "jump" over it and
                                -- bind a location to after it
                                handleLoc (eor,e) (l1,ty) = do
@@ -370,13 +369,13 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
                  v' <- gensym "tailapp"
                  let ty = gRecoverType ddefs env2 e
                      e' = LetE (v',[], ty, AppE v args arg) (VarE v')
-                 go (e')
+                 go e'
 
-          PrimAppE (DictInsertP dty) [(VarE a),d,k,v] -> do
+          PrimAppE (DictInsertP dty) [VarE a,d,k,v] -> do
                  v' <- gensym "tailprim"
-                 let e' = LetE (v',[],SymDictTy (Just a) $ stripTyLocs dty, PrimAppE (DictInsertP dty) [(VarE a),d,k,v]) (VarE v')
+                 let e' = LetE (v',[],SymDictTy (Just a) $ stripTyLocs dty, PrimAppE (DictInsertP dty) [VarE a,d,k,v]) (VarE v')
                  -- we fmap location at the top-level case expression
-                 go (e')
+                 go e'
 
           -- Same AppE as above. This could just fail, instead of trying to repair
           -- the program.
@@ -385,7 +384,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
                  let ty = L1.primRetTy pr
                      e' = LetE (v',[],ty, PrimAppE pr es) (VarE v')
                  -- we fmap location at the top-level case expression
-                 go (e')
+                 go e'
 
           -- RouteEnds creates let bindings for such expressions (see those cases below).
           -- Processing the RHS here would cause an infinite loop.
@@ -405,11 +404,9 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
             e2' <- exp fns retlocs eor lenv' afterenv (extendVEnv v ty env2) e2
             return $ LetE (v,ls,ty,e1) e2'
 
-          LetE (v,ls,ty,e1@MkProdE{}) e2 -> do
-            LetE (v,ls,ty,e1) <$> exp fns retlocs eor lenv afterenv (extendVEnv v ty env2) e2
+          LetE (v,ls,ty,e1@MkProdE{}) e2 -> LetE (v,ls,ty,e1) <$> exp fns retlocs eor lenv afterenv (extendVEnv v ty env2) e2
 
-          LetE (v,ls,ty,e1@(PrimAppE (DictLookupP _) _)) e2 -> do
-            LetE (v,ls,ty,e1) <$> exp fns retlocs eor lenv afterenv (extendVEnv v ty env2) e2
+          LetE (v,ls,ty,e1@(PrimAppE (DictLookupP _) _)) e2 -> LetE (v,ls,ty,e1) <$> exp fns retlocs eor lenv afterenv (extendVEnv v ty env2) e2
 
           --
 
@@ -437,7 +434,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
             let tys = L.map (gRecoverType ddefs env2) ls
                 prodty = ProdTy tys
             v <- gensym "flt_RE"
-            let ex = L1.mkLets [(v,[],prodty,(MkProdE ls))] (VarE v)
+            let ex = L1.mkLets [(v,[],prodty,MkProdE ls)] (VarE v)
             exp fns retlocs eor lenv afterenv (extendVEnv v prodty env2) ex
 
           ProjE{} -> do
@@ -455,7 +452,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
                  let ty = PackedTy (getTyOfDataCon ddefs dc) loc
                      e' = LetE (v',[],ty, DataConE loc dc es)
                                (VarE v')
-                 exp fns retlocs eor (M.insert v' loc lenv) afterenv (extendVEnv v' ty env2) (e')
+                 exp fns retlocs eor (M.insert v' loc lenv) afterenv (extendVEnv v' ty env2) e'
 
           LitE i -> return (LitE i)
           CharE i -> return (CharE i)
@@ -491,7 +488,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
 
           Ext (IndirectionE{}) -> return e
 
-          Ext (LetAvail vs e)  -> Ext <$> LetAvail vs <$> go e
+          Ext (LetAvail vs e)  -> Ext . LetAvail vs <$> go e
 
           Ext ext -> error $ "RouteEnds: Shouldn't encounter " ++ sdoc ext
 
@@ -500,14 +497,14 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
 
         where  mkRet :: [LocVar] -> Exp2 -> PassM Exp2
                mkRet ls (VarE v) =
-                 let ends = L.map (\l -> findEnd l eor) ls
+                 let ends = L.map (`findEnd` eor) ls
                  in return $ Ext (RetE ends v)
                mkRet _ e = error $ "Expected variable reference in tail call, got "
-                           ++ (show e)
+                           ++ show e
 
                funtype :: Var -> ArrowTy2
                funtype v = case M.lookup v fns of
-                             Nothing -> error $ "Function " ++ (show v) ++ " not found"
+                             Nothing -> error $ "Function " ++ show v ++ " not found"
                              Just fundef -> funTy fundef
 
                go = exp fns retlocs eor lenv afterenv env2
@@ -529,10 +526,8 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
                                | otherwise -> acc
                              Nothing -> acc
                          scalar_witnesses = go la []
-                         bind_witnesses bod ls =
-                           L.foldr (\(v,w,sz) acc ->
-                                     Ext $ LetLocE v (AfterConstantLE sz w) acc)
-                           bod ls
+                         bind_witnesses = L.foldr $ \(v,w,sz) acc ->
+                            Ext $ LetLocE v (AfterConstantLE sz w) acc
                          bod' = bind_witnesses e scalar_witnesses
                          bod'' =  Ext (LetLocE la (FromEndLE l2) bod')
                      in wrapBody bod'' ls
@@ -555,7 +550,7 @@ routeEnds prg@Prog{ddefs,fundefs,mainExp} = do
 
                  -- Walk through our pairs of (location, endof location) and update the
                  -- endof relation.
-                 let mkEor (l1,l2) eor = mkEnd l1 l2 eor
+                 let mkEor (l1,l2) = mkEnd l1 l2
 
 
                  newls <- reverse <$> foldM handleTravList [] travlist

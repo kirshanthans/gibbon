@@ -7,7 +7,7 @@
 module Gibbon.Passes.InferRegionScope
   (inferRegScope, inferRegScopeExp) where
 
-import Data.Graph
+-- import Data.Graph
 import qualified Data.Map as M
 
 import Gibbon.DynFlags
@@ -24,7 +24,7 @@ inferRegScope Prog{ddefs,fundefs,mainExp} = do
   let fundefs' = M.fromList $ map (\f -> (funName f,f)) fds'
   mainExp' <- case mainExp of
                 Nothing -> return Nothing
-                Just (mn, ty) -> Just <$> (,ty) <$> inferRegScopeExp mn
+                Just (mn, ty) -> Just . (,ty) <$> inferRegScopeExp mn
   return $ Prog ddefs fundefs' mainExp'
 
 inferRegScopeFun :: FunDef2 -> PassM FunDef2
@@ -78,32 +78,30 @@ inferRegScopeExp ex =
             _ ->
               let deps = depList ex
               in case deps of
-                   ((retVar,_,_):_) ->
-                     let (g,_,vtxF) = graphFromEdges deps
+                   ((_retVar,_,_):_) ->
+                     let
+                        --  (g,_,vtxF) = graphFromEdges deps
                          regV = regionToVar r
                          -- Vertex of the region variable
-                         regVertex =
-                           case vtxF regV of
-                             Just x  -> x
-                             Nothing -> error $ "No vertex for:" ++ sdoc r
+                        --  regVertex =
+                        --    case vtxF regV of
+                        --      Just x  -> x
+                        --      Nothing -> error $ "No vertex for:" ++ sdoc r
+
                          -- Vertex of the return value
-                         retVertex =
-                           case vtxF retVar of
-                             Just x  -> x
-                             Nothing -> error $ "No vertex for:" ++ sdoc retVar
+                        --  retVertex =
+                        --    case vtxF retVar of
+                        --      Just x  -> x
+                        --      Nothing -> error $ "No vertex for:" ++ sdoc retVar
                          -- The value in the region  escapes the current scope if there's
                          -- a path between the region variable and the thing returned.
                          -- TODO: Warn the user when this happens in a fn ?
                      in do dflags <- getDynFlags
-                           let defaultMul = if (gopt Opt_BigInfiniteRegions dflags) ||
-                                               (gopt Opt_Gibbon1 dflags)
+                           let defaultMul = if gopt Opt_BigInfiniteRegions dflags ||
+                                               gopt Opt_Gibbon1 dflags
                                             then BigInfinite
                                             else Infinite
-                           if path g retVertex regVertex
-                           then Ext . LetRegionE (GlobR regV defaultMul) Undefined Nothing <$> go rhs
-                           -- [2018.03.30] - TEMP: Turning off scoped buffers.
-                           -- else Ext$ LetRegionE (DynR regV mul) (inferRegScopeExp rhs)
-                           else Ext . LetRegionE (GlobR regV defaultMul) Undefined Nothing <$> go rhs
+                           Ext . LetRegionE (GlobR regV defaultMul) Undefined Nothing <$> go rhs
                    [] -> return ex
 
         LetParRegionE r sz ty rhs ->
@@ -112,42 +110,41 @@ inferRegScopeExp ex =
             _ ->
               let deps = depList ex
               in case deps of
-                   ((retVar,_,_):_) ->
-                     let (g,_,vtxF) = graphFromEdges deps
-                         regV = regionToVar r
-                         -- Vertex of the region variable
-                         regVertex =
-                           case vtxF regV of
-                             Just x  -> x
-                             Nothing -> error $ "No vertex for:" ++ sdoc r
-                         -- Vertex of the return value
-                         retVertex =
-                           case vtxF retVar of
-                             Just x  -> x
-                             Nothing -> error $ "No vertex for:" ++ sdoc retVar
-                         -- The value in the region  escapes the current scope if there's
-                         -- a path between the region variable and the thing returned.
-                         -- TODO: Warn the user when this happens in a fn ?
+                   ((_retVar,_,_):_) ->
+                     let
+                        -- (g,_,vtxF) = graphFromEdges deps
+                        regV = regionToVar r
+
+                        -- Vertex of the region variable
+                        -- regVertex =
+                        --   case vtxF regV of
+                        --     Just x  -> x
+                        --     Nothing -> error $ "No vertex for:" ++ sdoc r
+                        -- Vertex of the return value
+
+                        -- retVertex =
+                        --   case vtxF retVar of
+                        --     Just x  -> x
+                        --     Nothing -> error $ "No vertex for:" ++ sdoc retVar
+                        -- The value in the region  escapes the current scope if there's
+                        -- a path between the region variable and the thing returned.
+                        -- TODO: Warn the user when this happens in a fn ?
                      in do dflags <- getDynFlags
-                           let defaultMul = if (gopt Opt_BigInfiniteRegions dflags) ||
-                                               (gopt Opt_Gibbon1 dflags)
+                           let defaultMul = if gopt Opt_BigInfiniteRegions dflags ||
+                                               gopt Opt_Gibbon1 dflags
                                             then BigInfinite
                                             else Infinite
-                           if path g retVertex regVertex
-                           then Ext <$> LetParRegionE (GlobR regV defaultMul) Undefined Nothing <$> (go rhs)
-                           -- [2018.03.30] - TEMP: Turning off scoped buffers.
-                           -- else Ext$ LetParRegionE (DynR regV mul) (inferRegScopeExp rhs)
-                           else Ext <$> LetParRegionE (GlobR regV defaultMul) Undefined Nothing <$> (go rhs)
+                           Ext . LetParRegionE (GlobR regV defaultMul) Undefined Nothing <$> go rhs
                    [] -> return ex
 
         -- Straightforward recursion
-        LetLocE loc le bod -> Ext <$> LetLocE loc le <$> (go bod)
+        LetLocE loc le bod -> Ext . LetLocE loc le <$> go bod
         RetE{}     -> return ex
         FromEndE{} -> return ex
         BoundsCheck{} -> return ex
         IndirectionE{}-> return ex
         GetCilkWorkerNum -> return ex
-        LetAvail vs e    -> Ext <$> LetAvail vs <$> go e
+        LetAvail vs e    -> Ext . LetAvail vs <$> go e
 
     -- Straightforward recursion ...
     VarE{}     -> return ex
@@ -159,17 +156,17 @@ inferRegScopeExp ex =
     PrimAppE{} -> return ex
     DataConE{} -> return ex
     ProjE i e  -> ProjE i <$> go e
-    IfE a b c  -> (IfE a) <$> go b <*> go c
+    IfE a b c  -> IfE a <$> go b <*> go c
     MkProdE ls -> MkProdE <$> mapM go ls
-    LetE (v,locs,ty,rhs) bod -> LetE <$> (v,locs,ty,) <$> go rhs <*> go bod
-    CaseE scrt mp -> (CaseE scrt) <$> mapM (\(a,b,c) -> (a,b,) <$> go c) mp
+    LetE (v,locs,ty,rhs) bod -> LetE . (v,locs,ty,) <$> go rhs <*> go bod
+    CaseE scrt mp -> CaseE scrt <$> mapM (\(a,b,c) -> (a,b,) <$> go c) mp
     TimeIt e ty b -> do
       e' <- go e
       return $ TimeIt e' ty b
     SpawnE{} -> pure ex
     SyncE{}  -> pure ex
     WithArenaE v e -> WithArenaE v <$> go e
-    MapE{}  -> error $ "inferRegScopeExp: TODO MapE"
-    FoldE{} -> error $ "inferRegScopeExp: TODO FoldE"
+    MapE{}  -> error "inferRegScopeExp: TODO MapE"
+    FoldE{} -> error "inferRegScopeExp: TODO FoldE"
   where
     go = inferRegScopeExp

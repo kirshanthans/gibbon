@@ -23,15 +23,15 @@ directL3 prg@(Prog ddfs fndefs mnExp) = do
   where
     init_fun_env = progToEnv prg
 
-    goDDef :: DDef1 -> DDef3 
-    goDDef ddf@DDef{dataCons} = 
+    goDDef :: DDef1 -> DDef3
+    goDDef ddf@DDef{dataCons} =
       ddf{dataCons  = map(second (map(second goTy))) dataCons}
 
     fd :: FunDef1 -> FunDef3
     fd FunDef{funName,funArgs,funTy,funBody,funMeta} =
         let env2 = extendsVEnv (M.fromList $ zip funArgs (fst funTy)) init_fun_env in
         FunDef { funName = funName
-               , funTy   = (map goTy $ fst funTy, goTy $ snd funTy)
+               , funTy   = bimap (map goTy) goTy funTy
                , funArgs = funArgs
                , funBody = go env2 funBody
                , funMeta = funMeta

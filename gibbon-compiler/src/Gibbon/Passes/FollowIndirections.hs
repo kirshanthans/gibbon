@@ -40,17 +40,17 @@ followIndirections (Prog ddefs fundefs mainExp) = do
             callv <- gensym "call"
             let _effs = arrEffs funTy
             endofs <- mapM (\_ -> gensym "endof") (locRets funTy)
-            let ret_endofs = foldr (\(end, (EndOf (LRM loc _ _))) acc ->
+            let ret_endofs = foldr (\(end, EndOf (LRM loc _ _)) acc ->
                                       if loc == scrt_loc
                                       then jump : acc
                                       else end : acc)
                              []
                              (zip endofs (locRets funTy))
             let args = foldr (\v acc -> if v == scrtv
-                                        then ((VarE indir_ptrv) : acc)
-                                        else (VarE v : acc))
+                                        then VarE indir_ptrv : acc
+                                        else VarE v : acc)
                              [] funArgs
-            let in_locs = foldr (\loc acc -> if loc ==  scrt_loc then (indir_ptrv : acc) else (loc : acc)) [] (inLocVars funTy)
+            let in_locs = foldr (\loc acc -> if loc ==  scrt_loc then indir_ptrv : acc else loc : acc) [] (inLocVars funTy)
             let out_locs = outLocVars funTy
             wc <- gensym "wildcard"
             let indir_bod = Ext $ LetLocE jump (AfterConstantLE 8 indir_ptrloc) $
@@ -66,7 +66,7 @@ followIndirections (Prog ddefs fundefs mainExp) = do
                             Ext (RetE endofs callv)
             let redir_br = (redir_dcon,[(indir_ptrv,indir_ptrloc)],redir_bod)
             ----------------------------------------
-            (pure (CaseE scrt (brs ++ [indir_br,redir_br])))
+            pure (CaseE scrt (brs ++ [indir_br,redir_br]))
 
           IfE a b c -> do
             a' <- go env  out_ty funName funArgs funTy a
@@ -74,18 +74,18 @@ followIndirections (Prog ddefs fundefs mainExp) = do
             c' <- go env  out_ty funName funArgs funTy c
             pure $ IfE a' b' c'
 
-          WithArenaE v bod -> (WithArenaE v) <$> go env  out_ty funName funArgs funTy bod
+          WithArenaE v bod -> WithArenaE v <$> go env  out_ty funName funArgs funTy bod
 
           LetE (v,locs,ty,rhs) bod ->
             LetE (v,locs,ty,rhs) <$> go (M.insert v ty env)  out_ty funName funArgs funTy  bod
 
           Ext (LetLocE loc rhs bod) ->
-            Ext <$> (LetLocE loc rhs) <$> go env  out_ty funName funArgs funTy  bod
+            Ext . LetLocE loc rhs <$> go env  out_ty funName funArgs funTy  bod
 
           Ext (LetRegionE reg sz ty bod) ->
-            Ext <$> (LetRegionE reg sz ty) <$> go env  out_ty funName funArgs funTy  bod
+            Ext . LetRegionE reg sz ty <$> go env  out_ty funName funArgs funTy  bod
 
           Ext (LetParRegionE reg sz ty bod) ->
-            Ext <$> (LetParRegionE reg sz ty) <$> go env  out_ty funName funArgs funTy  bod
+            Ext . LetParRegionE reg sz ty <$> go env  out_ty funName funArgs funTy  bod
 
           _ -> pure e

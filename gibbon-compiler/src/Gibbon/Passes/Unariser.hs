@@ -116,7 +116,7 @@ unariserExp isTerminal ddfs stk env2 ex =
              case fty of
                -- reconstruct, in case of nested tuple (whether terminal or not)
                ProdTy tys -> do
-                 return $ MkProdE (map (\k -> ProjE k e') [j..(j+length tys-1)])
+                 return $ MkProdE (map (`ProjE` e') [j..(j+length tys-1)])
                -- if not a tuple, take projection
                _ -> return $ ProjE j e'
 
@@ -294,7 +294,7 @@ flatProjIdx n ty =
 -- ProdTy [IntTy, IntTy, IntTy, IntTy, IntTy, IntTy]
 --
 flattenTy :: Ty3 -> Ty3
-flattenTy ty = 
+flattenTy ty =
   case ty of
     ProdTy _ -> ProdTy $ go ty
     _ -> ty

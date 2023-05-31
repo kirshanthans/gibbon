@@ -54,21 +54,19 @@ removeCopiesExp ddefs fundefs lenv env2 ex =
           indrDcon = filter isIndirectionTag $ getConOrdering ddefs tycon
       case indrDcon of
         [] -> error $ "removeCopies: No indirection constructor found for: " ++ sdoc tycon
-        [dcon] -> do
-          return $
-            mkLets ([(indirection,[],PackedTy tycon lout,
-                      Ext $ IndirectionE tycon dcon (lout , lenv # lout) (lin, lenv # lin) arg)])
-            (VarE indirection)
+        [dcon] -> return $
+          mkLets [(indirection,[],PackedTy tycon lout,
+                    Ext $ IndirectionE tycon dcon (lout , lenv # lout) (lin, lenv # lin) arg)]
+          (VarE indirection)
         oth -> error $ "removeCopies: Multiple indirection constructors: " ++ sdoc oth
 
-    LetE (v,locs,ty@(PackedTy tycon _), (AppE f [lin,lout] [arg])) bod | isCopyFunName f -> do
+    LetE (v,locs,ty@(PackedTy tycon _), AppE f [lin,lout] [arg]) bod | isCopyFunName f -> do
       -- Get the indirection datacon for this type
       let indrDcon = filter isIndirectionTag $ getConOrdering ddefs tycon
       case indrDcon of
         [] -> error $ "removeCopies: No indirection constructor found for: " ++ sdoc tycon
-        [dcon] -> do
-          LetE (v,locs,ty, Ext $ IndirectionE tycon dcon (lout , lenv # lout) (lin, lenv # lin) arg) <$>
-            removeCopiesExp ddefs fundefs lenv (extendVEnv v ty env2) bod
+        [dcon] -> LetE (v,locs,ty, Ext $ IndirectionE tycon dcon (lout , lenv # lout) (lin, lenv # lin) arg) <$>
+          removeCopiesExp ddefs fundefs lenv (extendVEnv v ty env2) bod
         oth -> error $ "removeCopies: Multiple indirection constructors: " ++ sdoc oth
 
     Ext ext ->
@@ -82,18 +80,18 @@ removeCopiesExp ddefs fundefs lenv env2 ex =
                       AfterVariableLE _ lc _ -> lenv # lc
                       FromEndLE lc           -> lenv # lc -- TODO: This needs to be fixed
                       FreeLE -> toVar "dummy"
-          Ext <$> LetLocE loc rhs <$>
+          Ext . LetLocE loc rhs <$>
             removeCopiesExp ddefs fundefs (M.insert loc reg lenv) env2 bod
        -- Straightforward recursion
         RetE{} -> return ex
         AddFixed{} -> return ex
-        LetRegionE r sz ty bod -> Ext <$> LetRegionE r sz ty <$> go bod
-        LetParRegionE r sz ty bod -> Ext <$> LetParRegionE r sz ty <$> go bod
+        LetRegionE r sz ty bod -> Ext . LetRegionE r sz ty <$> go bod
+        LetParRegionE r sz ty bod -> Ext . LetParRegionE r sz ty <$> go bod
         FromEndE{}       -> return ex
         BoundsCheck{}    -> return ex
         IndirectionE{}   -> return ex
         GetCilkWorkerNum -> return ex
-        LetAvail vs bod -> Ext <$> LetAvail vs <$> go bod
+        LetAvail vs bod -> Ext . LetAvail vs <$> go bod
 
     -- Straightforward recursion
     VarE{}     -> return ex
@@ -108,7 +106,7 @@ removeCopiesExp ddefs fundefs lenv env2 ex =
     IfE a b c  -> IfE <$> go a <*> go b <*> go c
     MkProdE ls -> MkProdE <$> mapM go ls
     LetE (v,locs,ty, rhs) bod ->
-      LetE <$> (v,locs,ty,) <$> go rhs <*>
+      LetE . (v,locs,ty,) <$> go rhs <*>
         removeCopiesExp ddefs fundefs lenv (extendVEnv v ty env2) bod
     CaseE scrt mp -> do
       let (VarE v) = scrt
@@ -123,14 +121,14 @@ removeCopiesExp ddefs fundefs lenv env2 ex =
       return $ WithArenaE v e'
     SpawnE{}-> pure ex
     SyncE   -> pure ex
-    MapE{}  -> error $ "go: TODO MapE"
-    FoldE{} -> error $ "go: TODO FoldE"
+    MapE{}  -> error "go: TODO MapE"
+    FoldE{} -> error "go: TODO FoldE"
   where
     go = removeCopiesExp ddefs fundefs lenv env2
     docase reg lenv1 env21 (dcon,vlocs,bod) = do
       -- Update the envs with bindings for pattern matched variables and locations.
       -- The locations point to the same region as the scrutinee.
       let (vars,locs) = unzip vlocs
-          lenv1' = foldr (\lc acc -> M.insert lc reg acc) lenv1 locs
+          lenv1' = foldr (`M.insert` reg) lenv1 locs
           env21' = extendPatternMatchEnv dcon ddefs vars locs env21
-      (dcon,vlocs,) <$> (removeCopiesExp ddefs fundefs lenv1' env21' bod)
+      (dcon,vlocs,) <$> removeCopiesExp ddefs fundefs lenv1' env21' bod

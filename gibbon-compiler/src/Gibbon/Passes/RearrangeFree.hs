@@ -13,8 +13,7 @@ rearrangeFree :: Prog -> PassM Prog
 rearrangeFree (Prog sym_tbl fundefs mainExp) = do
   fundefs' <- mapM rearrangeFreeFn fundefs
   mainExp' <- case mainExp of
-                Just (PrintExp tail) -> do
-                  Just <$> PrintExp <$> rearrangeFreeExp True Nothing tail
+                Just (PrintExp tail) -> Just . PrintExp <$> rearrangeFreeExp True Nothing tail
                 Nothing -> return Nothing
   return $ Prog sym_tbl fundefs' mainExp'
 
@@ -32,17 +31,16 @@ rearrangeFreeExp is_main frees tail =
             let clos = case frees of
                          Just f  -> f . LetPrimCallT binds prim rands
                          Nothing -> LetPrimCallT binds prim rands
-            bod' <- rearrangeFreeExp is_main (Just clos) bod
-            return bod'
+            rearrangeFreeExp is_main (Just clos) bod
             -- withTail (bod', undefined) (\trvs -> clos (RetValsT trvs))
         _ -> LetPrimCallT binds prim rands <$> go bod
 
     -- RetValsT{} -> return tail
     RetValsT ls -> do dflags <- getDynFlags
-                      let countRegions = (gopt Opt_CountAllRegions dflags) || (gopt Opt_CountParRegions dflags)
+                      let countRegions = gopt Opt_CountAllRegions dflags || gopt Opt_CountParRegions dflags
                           print_reg_count :: Tail -> Tail
                           print_reg_count = if is_main && countRegions
-                                              then (LetPrimCallT [] PrintRegionCount [])
+                                              then LetPrimCallT [] PrintRegionCount []
                                               else id
                       case frees of
                         Just f  -> return $ f $ print_reg_count (RetValsT ls)
@@ -72,10 +70,8 @@ rearrangeFreeExp is_main frees tail =
         go bod
     LetUnpackT binds ptr bod ->
       LetUnpackT binds ptr <$> go bod
-    LetAllocT lhs vals bod -> do
-      LetAllocT lhs vals <$> go bod
-    LetAvailT vs bod -> do
-      LetAvailT vs <$> go bod
+    LetAllocT lhs vals bod -> LetAllocT lhs vals <$> go bod
+    LetAvailT vs bod -> LetAvailT vs <$> go bod
     IfT tst con els ->
       IfT tst <$> go con <*> go els
     ErrT{} -> return tail

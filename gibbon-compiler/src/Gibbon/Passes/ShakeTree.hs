@@ -41,7 +41,7 @@ shakeTreeExp = go
         in
         if S.member v fv || hasEffect rhs
         then LetE (v,locs,t, go rhs) bod'
-        else dbgTrace 4 (" [shakeTreeExp] dropping binding: "++show (v,t,rhs))$ bod'
+        else dbgTrace 4 (" [shakeTreeExp] dropping binding: " ++ show (v,t,rhs)) bod'
 
     (VarE v)           -> VarE v
     (LitE i)           -> LitE i
@@ -53,7 +53,7 @@ shakeTreeExp = go
     (IfE e1 e2 e3)     -> IfE (go e1) (go e2) (go e3)
 
     (ProjE i e)  -> ProjE i $ go e
-    (MkProdE es) -> MkProdE $ map (go) es
+    (MkProdE es) -> MkProdE $ map go es
 
     -- We don't rename field binders with to/from witness:
     (CaseE e mp) -> let mp' = map dorhs mp
@@ -61,16 +61,16 @@ shakeTreeExp = go
                             (c,args,go ae)
                     in CaseE (go e) mp'
 
-    (DataConE c loc es) -> DataConE c loc $ map (go) es
+    (DataConE c loc es) -> DataConE c loc $ map go es
     (TimeIt e t b)      -> TimeIt (go e) t b
     (MapE (v,t,e') e)   -> MapE (v,t,go e') (go e)
     (FoldE (v1,t1,e1) (v2,t2,e2) e3) ->
          FoldE (v1,t1,go e1) (v2,t2,go e2)
                (go e3)
 
-    (WithArenaE{}) -> error "shakeTreExp: WithArenaE not handled."
-    (SpawnE{}) -> error "shakeTreExp: SpawnE not handled."
-    (SyncE{}) -> error "shakeTreExp: SyncE not handled."
+    WithArenaE {} -> error "shakeTreExp: WithArenaE not handled."
+    SpawnE {} -> error "shakeTreExp: SpawnE not handled."
+    SyncE {} -> error "shakeTreExp: SyncE not handled."
 
     -- Assume that these are trivial, and always have effects
     Ext _ext -> e0
@@ -91,13 +91,13 @@ hasEffect rhs =
       VarE _ -> False
       LitE _ -> False
       CharE _ -> False
-      FloatE{}  -> False
+      FloatE {}  -> False
       LitSymE _ -> False
 
       -- These might have effects on output cursors, but the output cursors aren't used
       -- again!  We need to tie the knot in dataflow dependencies, making the start (value)
       -- depend on the end (final cursor).
-      AppE _ _ _ -> True  -- For now, don't drop.
+      AppE {} -> True  -- For now, don't drop.
 
       PrimAppE _ _ -> False -- No prims have effects.
 
@@ -110,16 +110,16 @@ hasEffect rhs =
 
       CaseE _ _ -> True -- Umm, just don't drop for now. FIXME/ REVISIT THIS!
 
-      DataConE _ _ _ -> True
+      DataConE {} -> True
 
-      TimeIt{} -> True -- Yes, has effect of printing!
+      TimeIt {} -> True -- Yes, has effect of printing!
 
       MapE _ _ -> error "hasEffect: FIXME MapE"
-      FoldE _ _ _ -> error "hasEffect: FIXME FoldE"
+      FoldE {} -> error "hasEffect: FIXME FoldE"
 
-      WithArenaE{} -> error "hasEffect: WithArenaE not handled."
-      SpawnE{} -> error "hasEffect: SpawnE not handled."
-      SyncE{} -> error "hasEffect: SyncE not handled."
+      WithArenaE {} -> error "hasEffect: WithArenaE not handled."
+      SpawnE {} -> error "hasEffect: SpawnE not handled."
+      SyncE {} -> error "hasEffect: SyncE not handled."
 
       -- always have effects
       Ext _ -> True

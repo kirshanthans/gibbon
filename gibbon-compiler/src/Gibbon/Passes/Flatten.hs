@@ -31,7 +31,7 @@ import qualified Gibbon.L0.Syntax as L0
 flattenL1 :: Prog1 -> PassM Prog1
 flattenL1 prg@(Prog defs funs main) = do
     main' <- case main of
-               Just (e,ty) -> Just <$> (,ty) <$> gFlattenExp defs env20 e
+               Just (e,ty) -> Just . (,ty) <$> gFlattenExp defs env20 e
                Nothing -> return Nothing
     funs' <- flattenFuns funs
     return $ Prog defs funs' main'
@@ -107,10 +107,10 @@ instance FlattenDeps e l d => Flattenable (PreExp e l d) where
 exp :: forall e l d. FlattenDeps e l d
     => DDefs (TyOf (PreExp e l d))
     -> Env2 (TyOf (PreExp e l d))
-    -> (PreExp e l d)
-    -> PassM ([Binds (PreExp e l d)], (PreExp e l d))
+    -> PreExp e l d
+    -> PassM ([Binds (PreExp e l d)], PreExp e l d)
 exp ddfs env2 e0 =
-  let triv :: String -> (PreExp e l d) -> PassM ([Binds (PreExp e l d)], (PreExp e l d))
+  let triv :: String -> PreExp e l d -> PassM ([Binds (PreExp e l d)], PreExp e l d)
       triv m e = -- Force something to be trivial
         if isTrivial e
         then return ([],e)
@@ -120,7 +120,7 @@ exp ddfs env2 e0 =
                 return ( bnds++[(tmp,[],ty,e')]
                        , VarE tmp)
 
-      go :: (PreExp e l d) -> PassM ([Binds (PreExp e l d)], (PreExp e l d))
+      go :: PreExp e l d -> PassM ([Binds (PreExp e l d)], PreExp e l d)
       go = exp ddfs env2
 
       gols f ls m = do (bndss,ls') <- unzip <$> mapM (triv m) ls
@@ -142,7 +142,7 @@ exp ddfs env2 e0 =
     MkProdE ls        -> gols  MkProdE      ls "Prd"
     DataConE loc k ls -> gols (DataConE loc k) ls "Pkd"
 
-    LetE (v1,lv1,t1, ((LetE (v2,lv2,t2,rhs2) rhs1))) bod -> do
+    LetE (v1,lv1,t1, LetE (v2,lv2,t2,rhs2) rhs1) bod -> do
       (bnd, rhs) <- go (LetE (v2,lv2,t2,rhs2) $
                         LetE (v1,lv1,t1,rhs1) bod)
       return (bnd, rhs)
@@ -186,7 +186,7 @@ exp ddfs env2 e0 =
       return ([], WithArenaE v (flatLets bnd e'))
 
     MapE _ _      -> error "FINISHLISTS"
-    FoldE _ _ _   -> error "FINISHLISTS"
+    FoldE {}   -> error "FINISHLISTS"
 
 -----------------------------------------------------------------------------------------
 
@@ -210,9 +210,9 @@ flattenL0 prg@(Prog defs funs main) = do
     env20 = progToEnv prg
 
 flattenExp0 :: L0.DDefs0 -> Env2 L0.Ty0 -> L0.Exp0
-            -> PassM ([Binds (L0.Exp0)], L0.Exp0)
+            -> PassM ([Binds L0.Exp0], L0.Exp0)
 flattenExp0 ddfs env2 e0 =
-  let triv :: String -> L0.Exp0 -> PassM ([Binds (L0.Exp0)], L0.Exp0)
+  let triv :: String -> L0.Exp0 -> PassM ([Binds L0.Exp0], L0.Exp0)
       triv m e = -- Force something to be trivial
         if isTrivial e
         then return ([],e)
@@ -222,7 +222,7 @@ flattenExp0 ddfs env2 e0 =
                 return ( bnds++[(tmp,[],ty,e')]
                        , VarE tmp)
 
-      go :: L0.Exp0 -> PassM ([Binds (L0.Exp0)], L0.Exp0)
+      go :: L0.Exp0 -> PassM ([Binds L0.Exp0], L0.Exp0)
       go = flattenExp0 ddfs env2
 
       gols f ls m = do (bndss,ls') <- unzip <$> mapM (triv m) ls
@@ -242,7 +242,7 @@ flattenExp0 ddfs env2 e0 =
     MkProdE ls        -> gols  MkProdE      ls "Prd"
     DataConE loc k ls -> gols (DataConE loc k) ls "Pkd"
 
-    LetE (v1,lv1,t1, ((LetE (v2,lv2,t2,rhs2) rhs1))) bod -> do
+    LetE (v1,lv1,t1, LetE (v2,lv2,t2,rhs2) rhs1) bod -> do
       (bnd, rhs) <- go (LetE (v2,lv2,t2,rhs2) $
                         LetE (v1,lv1,t1,rhs1) bod)
       return (bnd, rhs)
@@ -282,7 +282,7 @@ flattenExp0 ddfs env2 e0 =
     SyncE -> pure ([], SyncE)
     WithArenaE{}  -> error "flattenL0: WitnArenaE not handled."
     MapE _ _      -> error "FINISHLISTS"
-    FoldE _ _ _   -> error "FINISHLISTS"
+    FoldE {}   -> error "FINISHLISTS"
 
     Ext ext ->
       case ext of

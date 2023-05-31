@@ -32,10 +32,10 @@ hoistExp _ ex0 = return $ gocap ex0
     (FloatE _)    -> ([], e0)
     (LitSymE _)   -> ([], e0)
     (VarE _)      -> ([], e0)
-    (AppE _ _ _)  -> ([], e0)
+    (AppE {})  -> ([], e0)
     (PrimAppE{})  -> ([], e0)
     (MapE _ _)    -> error "hoistExp.go: FINISHME MapE"
-    (FoldE _ _ _) -> error "hoistExp.go: FINISHME FoldE"
+    (FoldE {}) -> error "hoistExp.go: FINISHME FoldE"
 
     -- Here's where we lift outside timings!!
     (TimeIt e t b) -> let (lts,e') = go e in
@@ -77,7 +77,7 @@ hoistExp _ ex0 = return $ gocap ex0
 
     (SpawnE{})    -> ([], e0)
 
-    (SyncE)       -> ([], e0)
+    SyncE       -> ([], e0)
 
     (WithArenaE v e) -> let (lts,e') = go e in
                         (lts, WithArenaE v e')
