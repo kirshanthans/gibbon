@@ -54,7 +54,7 @@ type Ty1 = UrTy ()
 
 --------------------------------------------------------------------------------
 
-data E1Ext loc dec = BenchE Var [loc] [(PreExp E1Ext loc dec)] Bool
+data E1Ext loc dec = BenchE Var [loc] [PreExp E1Ext loc dec] Bool
                    | AddFixed Var Int
   deriving (Show, Ord, Eq, Read, Generic, NFData, Out)
 
@@ -71,7 +71,7 @@ instance (Show l, Show d, Out l, Out d) => Expression (E1Ext l d) where
 
 instance (Show l, Show d, Out l, Out d) => Flattenable (E1Ext l d) where
   gFlattenGatherBinds _ddfs _env ex = return ([], ex)
-  gFlattenExp _ddfs _env ex = return ex
+  gFlattenExp _ddfs _env = return
 
 instance HasSimplifiableExt E1Ext l d => SimplifiableExt (PreExp E1Ext l d) (E1Ext l d) where
   gInlineTrivExt _env ext = ext
